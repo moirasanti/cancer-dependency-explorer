@@ -1,0 +1,17 @@
+{
+  "folders": [
+    { "path": "." }
+  ],
+  "settings": {
+    "files.associations": { "*.Rmd": "rmd" },
+    "files.exclude": {
+      "**/.Rproj.user": true,
+      "**/results/*/intermediate": true
+    },
+    "r.alwaysUseActiveTerminal": true,
+    "r.bracketedPaste": true
+  },
+  "extensions": {
+    "recommendations": ["REditorSupport.r", "quarto.quarto"]
+  }
+}

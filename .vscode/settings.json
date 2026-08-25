@@ -1,0 +1,6 @@
+{
+  "r.alwaysUseActiveTerminal": true,
+  "r.bracketedPaste": true,
+  "editor.formatOnSave": false,
+  "files.trimTrailingWhitespace": true
+}

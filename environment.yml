@@ -1,0 +1,11 @@
+name: cancer-dependency-explorer
+channels:
+  - conda-forge
+dependencies:
+  - r-base=4.5
+  - r-data.table>=1.17
+  - r-ggplot2>=3.5
+  - r-rmarkdown>=2.29
+  - r-knitr>=1.49
+  - r-yaml>=2.3
+  - pandoc>=3.6

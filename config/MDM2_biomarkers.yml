@@ -1,0 +1,4 @@
+target: MDM2
+mutation:
+  - TP53
+copy_number: []

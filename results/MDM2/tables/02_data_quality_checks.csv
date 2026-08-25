@@ -1,0 +1,7 @@
+check,passed,detail
+Target present in CRISPR matrix,TRUE,MDM2
+Unique ModelID after joins,TRUE,1208
+At least 50 dependency observations,TRUE,1208
+At least 50 lineage annotations,TRUE,1208
+Expression has nonzero variance,TRUE,SD 1.289
+Copy number has nonzero variance,TRUE,SD 5.485

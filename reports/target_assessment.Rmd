@@ -1,0 +1,145 @@
+---
+title: "Cancer Dependency Explorer"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    self_contained: true
+    theme: cosmo
+    css: report.css
+params:
+  target: "GENE"
+  target_dir: "results/GENE"
+  release: "DepMap Public"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+target <- params$target
+target_dir <- params$target_dir
+table_dir <- file.path(target_dir, "tables")
+figure_dir <- file.path(target_dir, "figures")
+read_table <- function(name) read.csv(file.path(table_dir, name), check.names = FALSE)
+fmt <- function(x, digits = 3) formatC(x, digits = digits, format = "fg")
+fmt_p <- function(x) ifelse(is.na(x), "not estimable", ifelse(x < 0.001, format(x, scientific = TRUE, digits = 2), sprintf("%.3f", x)))
+dependency <- read_table("04_dependency_summary.csv")
+lineage_global <- read_table("05_lineage_global_test.csv")
+lineages <- read_table("06_lineage_associations.csv")
+continuous <- read_table("07_target_continuous_associations.csv")
+mutations <- read_table("08_top_mutation_associations.csv")
+copy_number <- read_table("09_top_copy_number_associations.csv")
+selection <- read_table("10_biomarker_selection.csv")
+coefficients <- read_table("11_multivariable_model_coefficients.csv")
+performance <- read_table("12_model_performance.csv")
+quality <- read_table("02_data_quality_checks.csv")
+```
+
+# The question
+
+**Which molecular features predict dependency on `r target` across cancer cell models?**
+
+This reproducible target assessment integrates CRISPR dependency with lineage, expression, copy number and damaging somatic mutations from **`r params$release`**. More-negative Chronos scores indicate that knockout has a stronger effect on cell fitness.
+
+# Data quality
+
+```{r quality-table}
+knitr::kable(quality, caption = "Pre-analysis data-quality checks")
+```
+
+`r sum(quality$passed)` of `r nrow(quality)` checks passed. A failed check is retained in this report rather than silently ignored; critical failures stop the workflow before modelling.
+
+# Dependency distribution
+
+```{r distribution-figure, out.width='90%', fig.align='center'}
+knitr::include_graphics(file.path(figure_dir, "01_dependency_distribution.png"))
+```
+
+Across `r dependency$n` models, the median `r target` Chronos score was `r fmt(dependency$median)` (interquartile range `r fmt(dependency$q25)` to `r fmt(dependency$q75)`). The proportion below -0.5 was `r sprintf("%.1f%%", 100 * dependency$proportion_below_minus_0_5)`. These thresholds describe the distribution; they do not establish clinical actionability.
+
+# Lineage specificity
+
+```{r lineage-figure, out.width='95%', fig.align='center'}
+knitr::include_graphics(file.path(figure_dir, "02_lineage_dependency.png"))
+```
+
+The global lineage comparison gave a Kruskal–Wallis P value of `r fmt_p(lineage_global$p_value)`. The lineage with the most-negative median difference from the remaining models was **`r lineages$lineage[which.min(lineages$median_difference)]`** (`r fmt(min(lineages$median_difference))` Chronos units). This comparison is descriptive and may reflect molecular differences correlated with lineage.
+
+```{r lineage-table}
+knitr::kable(head(lineages[order(lineages$fdr), ], 10), digits = 3, caption = "Leading lineage associations")
+```
+
+# Target expression and copy number
+
+```{r expression-figure, out.width='90%', fig.align='center'}
+knitr::include_graphics(file.path(figure_dir, "03_expression_dependency.png"))
+```
+
+`r paste(sprintf("%s showed Spearman rho %s (P = %s)", continuous$feature, fmt(continuous$spearman_rho), fmt_p(continuous$p_value)), collapse = "; ")`. Correlation does not distinguish a causal biomarker from a feature that tracks cell state or lineage.
+
+# Genomic associations
+
+## Damaging mutations
+
+```{r mutation-figure, out.width='90%', fig.align='center'}
+knitr::include_graphics(file.path(figure_dir, "04_mutation_associations.png"))
+```
+
+```{r mutation-text, results='asis'}
+significant_mutations <- mutations[!is.na(mutations$fdr) & mutations$fdr < 0.05, ]
+if (nrow(significant_mutations)) {
+  top <- significant_mutations[1, ]
+  cat(sprintf("The leading mutation association was **%s** (altered-minus-reference effect %s, FDR %s). A negative effect denotes stronger `%s` dependency in altered models.\n",
+              top$gene, fmt(top$effect), fmt_p(top$fdr), target))
+} else cat("No damaging-mutation feature passed the pre-specified 5% FDR threshold.\n")
+```
+
+```{r mutation-table}
+knitr::kable(head(mutations, 10), digits = 3, caption = "Top damaging-mutation associations")
+```
+
+## Copy number
+
+```{r copy-figure, out.width='90%', fig.align='center'}
+knitr::include_graphics(file.path(figure_dir, "05_copy_number_associations.png"))
+```
+
+```{r copy-text, results='asis'}
+significant_copy <- copy_number[!is.na(copy_number$fdr) & copy_number$fdr < 0.05, ]
+if (nrow(significant_copy)) {
+  top <- significant_copy[1, ]
+  cat(sprintf("The leading copy-number association was **%s** (correlation %s, FDR %s). Correlated loci can represent the same chromosomal event and are filtered for redundancy before multivariable modelling.\n",
+              top$gene, fmt(top$correlation), fmt_p(top$fdr)))
+} else cat("No copy-number feature passed the pre-specified 5% FDR threshold.\n")
+```
+
+# Multivariable model
+
+```{r coefficient-figure, out.width='90%', fig.align='center'}
+knitr::include_graphics(file.path(figure_dir, "06_multivariable_coefficients.png"))
+```
+
+The model used `r performance$n` complete models and adjusted for lineage. Its adjusted R² was `r fmt(performance$adjusted_r_squared)`; fixed-feature 10-fold cross-validation gave RMSE `r fmt(performance$cv_rmse)` and R² `r fmt(performance$cv_r_squared)`. Confidence intervals use the HC3 heteroscedasticity-robust estimator.
+
+```{r model-text, results='asis'}
+molecular <- coefficients[coefficients$term != "(Intercept)" & !grepl("^lineage_model", coefficients$term), ]
+if (nrow(molecular)) {
+  strongest <- molecular[which.min(molecular$p_value), ]
+  direction <- if (strongest$estimate < 0) "stronger" else "weaker"
+  cat(sprintf("The strongest adjusted molecular association was **%s** (coefficient %s; 95%% CI %s to %s), corresponding to %s dependency as the feature increases or is present.\n",
+              strongest$label, fmt(strongest$estimate), fmt(strongest$conf_low), fmt(strongest$conf_high), direction))
+}
+```
+
+```{r coefficient-table}
+knitr::kable(coefficients, digits = 3, caption = "Multivariable coefficients with HC3 robust inference")
+```
+
+# Interpretation and limitations
+
+This analysis nominates molecular correlates of `r target` dependency; it does not demonstrate causality, druggability or therapeutic efficacy. Results may be influenced by lineage composition, correlated copy-number regions, complete-case selection and unmeasured confounding. Automatic feature discovery and model assessment use the same release, so inferential P values and fixed-feature cross-validation are exploratory rather than independent validation. Cell-line dependencies may not reproduce in tumours or normal tissues, and genetic knockout may not mimic pharmacological inhibition.
+
+The inverse question—*which dependencies are selective in models carrying mutation of a chosen tumour suppressor?*—requires a different feature-centric genome-wide dependency screen and is intentionally outside this repository's scope.
+
+# Reproducibility
+
+The aggregate outputs, figures and this report can be committed. Raw DepMap matrices and model-level intermediate data remain excluded from Git and must be obtained under their applicable data-use terms.

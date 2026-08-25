@@ -1,0 +1,24 @@
+modality,gene,source,selected,maximum_absolute_correlation,reason
+mutation,TP53,configured,TRUE,0.509844367942409,Retained
+mutation,ZNF107,automatic,TRUE,0.0571522035316154,Retained
+mutation,RB1,automatic,TRUE,0.0889841483853726,Retained
+copy_number,RPAP2,automatic,TRUE,0.123755564792698,Retained
+copy_number,RPL5,automatic,FALSE,0.834320586884634,Excluded: |correlation| >= 0.80 with a retained predictor
+copy_number,GLMN,automatic,FALSE,0.988466621828306,Excluded: |correlation| >= 0.80 with a retained predictor
+copy_number,GBP6,automatic,FALSE,0.873976953168233,Excluded: |correlation| >= 0.80 with a retained predictor
+copy_number,ENSG00000271949,automatic,FALSE,0.875640958782197,Excluded: |correlation| >= 0.80 with a retained predictor
+copy_number,LRRC8C,automatic,FALSE,0.879040146269796,Excluded: |correlation| >= 0.80 with a retained predictor
+copy_number,LRRC8D,automatic,FALSE,0.86570578059162,Excluded: |correlation| >= 0.80 with a retained predictor
+copy_number,LRRC8B,automatic,FALSE,0.87551039220494,Excluded: |correlation| >= 0.80 with a retained predictor
+copy_number,C1orf146,automatic,FALSE,0.981171070738826,Excluded: |correlation| >= 0.80 with a retained predictor
+copy_number,ENSG00000288629,automatic,FALSE,0.842502960404398,Excluded: |correlation| >= 0.80 with a retained predictor
+copy_number,DIPK1A,automatic,FALSE,0.859579020056777,Excluded: |correlation| >= 0.80 with a retained predictor
+copy_number,BTBD8,automatic,FALSE,0.987075361706117,Excluded: |correlation| >= 0.80 with a retained predictor
+copy_number,GBP1,automatic,FALSE,0.841841853030317,Excluded: |correlation| >= 0.80 with a retained predictor
+copy_number,GFI1,automatic,FALSE,0.944850855101656,Excluded: |correlation| >= 0.80 with a retained predictor
+copy_number,CCDC18,automatic,FALSE,0.850056095511045,Excluded: |correlation| >= 0.80 with a retained predictor
+copy_number,ZNF326,automatic,FALSE,0.906934295736101,Excluded: |correlation| >= 0.80 with a retained predictor
+copy_number,RBMXL1,automatic,FALSE,0.849045674783603,Excluded: |correlation| >= 0.80 with a retained predictor
+copy_number,EVI5,automatic,FALSE,0.875110020130308,Excluded: |correlation| >= 0.80 with a retained predictor
+copy_number,MTF2,automatic,FALSE,0.836265783084664,Excluded: |correlation| >= 0.80 with a retained predictor
+copy_number,GBE1,automatic,TRUE,0.159084620331181,Retained

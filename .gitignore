@@ -1,0 +1,15 @@
+.DS_Store
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+
+data/raw/
+data/processed/
+results/*/intermediate/
+
+*.csv.gz
+*.tsv.gz
+tmp/
+*.swp
+*~
