@@ -1,0 +1,2 @@
+n,predictors,adjusted_r_squared,residual_sd,cv_folds,cv_rmse,cv_r_squared,reference_lineage
+852,30,0.208025006336853,0.303078567191624,10,0.311535195786325,0.162229064346333,Lung

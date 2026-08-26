@@ -1,0 +1,3 @@
+feature,modality,n,spearman_rho,p_value
+EGFR expression,expression,1140,-0.285042946650465,9.4208474662337e-23
+EGFR copy number,copy_number,858,-0.135748734728852,6.6356806069237e-05

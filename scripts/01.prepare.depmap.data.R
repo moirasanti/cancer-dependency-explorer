@@ -1,72 +1,118 @@
-# Build a compact model-level table for the requested target. Wide genomic
-# matrices are screened later and are never written as model-level CSV files.
+## DESCRIPTION ################################################################
+## PREPARE DEPMAP DATA
+# This stage builds the model-level dataset used throughout the target
+# assessment. It reads the selected target's CRISPR dependency, expression and
+# copy-number measurements, then joins them to broad OncoTree lineage
+# annotations using the stable DepMap ModelID.
+#
+# Expected objects from the interactive setup or run_analysis.R:
+#   - target: requested HGNC gene symbol.
+#   - input.files: named paths to the dependency, expression, copy-number and
+#     model-annotation files. These are either provided by the user or derived
+#     from the DEPMAP_RAW_DIR environment variable.
+#   - table.dir and intermediate.dir: target-specific output directories.
+#
+# The script runs some sanity checks before analysis.
+# Saves compact coverage and quality-control tables, records session
+# information, and saves analysis.data as an (.git)ignored intermediate
+# for the subsequent numbered scripts.
 
-dependency <- read_gene_data(input_files[["dependency"]], target)
-setnames(dependency, target, "dependency")
+## LOAD DATA ###################################################################
+# Read the target dependency, expression and copy-number measurements.
+dependency.data <- read_depmap_gene_data(input.files[["dependency"]], target)
+setnames(dependency.data, target, "dependency")
 
-expression <- read_gene_data(input_files[["expression"]], target, default_only = TRUE)
-setnames(expression, target, "target_expression")
-
-copy_number <- read_gene_data(input_files[["copy_number"]], target, default_only = TRUE)
-setnames(copy_number, target, "target_copy_number")
-
-model_columns <- c(
-  "ModelID", "StrippedCellLineName", "OncotreeLineage",
-  "OncotreePrimaryDisease", "OncotreeSubtype"
+expression.data <- read_depmap_gene_data(
+  input.files[["expression"]], target, default.only = TRUE
 )
-available_model_columns <- intersect(
-  model_columns,
-  names(fread(input_files[["model"]], nrows = 0L, check.names = FALSE))
+setnames(expression.data, target, "target_expression")
+
+copy.number.data <- read_depmap_gene_data(
+  input.files[["copy_number"]], target, default.only = TRUE
 )
-annotation <- fread(input_files[["model"]], select = available_model_columns)
-annotation <- unique(annotation, by = "ModelID")
-if (!"OncotreeLineage" %in% names(annotation)) stop("Model.csv lacks OncotreeLineage.")
-setnames(annotation, c("StrippedCellLineName", "OncotreeLineage"), c("cell_line", "lineage"), skip_absent = TRUE)
+setnames(copy.number.data, target, "target_copy_number")
 
-analysis_data <- merge(dependency, annotation, by = "ModelID", all.x = TRUE)
-analysis_data <- merge(analysis_data, expression, by = "ModelID", all.x = TRUE)
-analysis_data <- merge(analysis_data, copy_number, by = "ModelID", all.x = TRUE)
+# Read the model annotations needed for interpretation and lineage adjustment.
+model.columns <- c(
+  "ModelID",
+  "StrippedCellLineName",
+  "OncotreeLineage"
+)
+available.model.columns <- intersect(
+  model.columns,
+  names(fread(input.files[["model"]], nrows = 0L, check.names = FALSE))
+)
+annotation.data <- fread(input.files[["model"]], select = available.model.columns)
+annotation.data <- unique(annotation.data, by = "ModelID")
+if (!"OncotreeLineage" %in% names(annotation.data)) stop("Model.csv lacks OncotreeLineage.")
+setnames(
+  annotation.data,
+  c("StrippedCellLineName", "OncotreeLineage"),
+  c("cell_line", "lineage"),
+  skip_absent = TRUE
+)
 
-if (anyDuplicated(analysis_data$ModelID)) stop("ModelID is not unique after modality joins.")
-if (sum(!is.na(analysis_data$dependency)) < 50L) stop("Fewer than 50 dependency observations are available for ", target, ".")
-if (sum(!is.na(analysis_data$lineage)) < 50L) stop("Insufficient lineage annotation for ", target, ".")
+# Join modalities to the dependency cohort using stable DepMap model IDs.
+analysis.data <- merge(dependency.data, annotation.data, by = "ModelID", all.x = TRUE)
+analysis.data <- merge(analysis.data, expression.data, by = "ModelID", all.x = TRUE)
+analysis.data <- merge(analysis.data, copy.number.data, by = "ModelID", all.x = TRUE)
 
-coverage <- data.frame(
+## Sanity check:
+# Stop before analysis when identifiers or core modality coverage are inadequate.
+if (anyDuplicated(analysis.data$ModelID)) stop("ModelID is not unique after modality joins.")
+if (sum(!is.na(analysis.data$dependency)) < 50L) {
+  stop("Fewer than 50 dependency observations are available for ", target, ".")
+}
+if (sum(!is.na(analysis.data$lineage)) < 50L) {
+  stop("Insufficient lineage annotation for ", target, ".")
+}
+
+## MAIN ANALYSIS ###############################################################
+## Summarise continuous associations between target dependency and its own expression or copy number.
+message("Screening continuous associations...")
+coverage.summary <- data.frame(
   modality = c("dependency", "lineage", "expression", "copy_number"),
   observed = c(
-    sum(!is.na(analysis_data$dependency)), sum(!is.na(analysis_data$lineage)),
-    sum(!is.na(analysis_data$target_expression)), sum(!is.na(analysis_data$target_copy_number))
+    sum(!is.na(analysis.data$dependency)),
+    sum(!is.na(analysis.data$lineage)),
+    sum(!is.na(analysis.data$target_expression)),
+    sum(!is.na(analysis.data$target_copy_number))
   ),
-  total_dependency_models = nrow(analysis_data)
+  total_dependency_models = nrow(analysis.data)
 )
-coverage$proportion <- coverage$observed / coverage$total_dependency_models
+coverage.summary$proportion <- coverage.summary$observed /
+  coverage.summary$total_dependency_models
 
-quality_checks <- data.frame(
+quality.checks <- data.frame(
   check = c(
-    "Target present in CRISPR matrix", "Unique ModelID after joins",
-    "At least 50 dependency observations", "At least 50 lineage annotations",
+    "Target in CRISPR matrix", "Unique ModelID after multiomic joins",
+    "At least 50 dependency observations", "At least 50 models with lineage annotation",
     "Expression has nonzero variance", "Copy number has nonzero variance"
   ),
   passed = c(
-    TRUE, !anyDuplicated(analysis_data$ModelID),
-    coverage$observed[coverage$modality == "dependency"] >= 50L,
-    coverage$observed[coverage$modality == "lineage"] >= 50L,
-    sd(analysis_data$target_expression, na.rm = TRUE) > 0,
-    sd(analysis_data$target_copy_number, na.rm = TRUE) > 0
+    TRUE,
+    !anyDuplicated(analysis.data$ModelID),
+    coverage.summary$observed[coverage.summary$modality == "dependency"] >= 50L,
+    coverage.summary$observed[coverage.summary$modality == "lineage"] >= 50L,
+    sd(analysis.data$target_expression, na.rm = TRUE) > 0,
+    sd(analysis.data$target_copy_number, na.rm = TRUE) > 0
   ),
   detail = c(
-    target, as.character(nrow(analysis_data)),
-    as.character(coverage$observed[coverage$modality == "dependency"]),
-    as.character(coverage$observed[coverage$modality == "lineage"]),
-    sprintf("SD %.3f", sd(analysis_data$target_expression, na.rm = TRUE)),
-    sprintf("SD %.3f", sd(analysis_data$target_copy_number, na.rm = TRUE))
+    target,
+    as.character(nrow(analysis.data)),
+    as.character(coverage.summary$observed[coverage.summary$modality == "dependency"]),
+    as.character(coverage.summary$observed[coverage.summary$modality == "lineage"]),
+    sprintf("SD %.3f", sd(analysis.data$target_expression, na.rm = TRUE)),
+    sprintf("SD %.3f", sd(analysis.data$target_copy_number, na.rm = TRUE))
   )
 )
 
-fwrite(coverage, file.path(table_dir, "01_modality_coverage.csv"))
-fwrite(quality_checks, file.path(table_dir, "02_data_quality_checks.csv"))
-saveRDS(analysis_data, file.path(intermediate_dir, "analysis_data.rds"))
-session_information <- sub("[[:space:]]+$", "", capture.output(sessionInfo()))
-writeLines(session_information, file.path(table_dir, "03_session_info.txt"))
+# Write compact summaries and retain the model-level table only as an ignored intermediate.
+fwrite(coverage.summary, file.path(table.dir, "01_modality_coverage.csv"))
+fwrite(quality.checks, file.path(table.dir, "02_data_quality_checks.csv"))
+saveRDS(analysis.data, file.path(intermediate.dir, "analysis_data.rds"))
 
-message("Prepared ", nrow(analysis_data), " dependency models.")
+session.information <- sub("[[:space:]]+$", "", capture.output(sessionInfo()))
+writeLines(session.information, file.path(table.dir, "03_session_info.txt"))
+
+message("Prepared ", nrow(analysis.data), " dependency models.")

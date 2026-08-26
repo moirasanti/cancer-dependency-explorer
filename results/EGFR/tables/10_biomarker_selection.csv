@@ -1,0 +1,10 @@
+modality,gene,source,selected,maximum_absolute_correlation,reason
+mutation,NF1,configured,TRUE,0.0299159627276387,Retained
+mutation,PTEN,configured,TRUE,0.113003765329865,Retained
+copy_number,MET,configured,TRUE,0.0525873520414621,Retained
+copy_number,ERBB2,configured,TRUE,0.0350124874146291,Retained
+mutation,SMAD4,automatic,TRUE,0.121729831290466,Retained
+mutation,FAT1,automatic,TRUE,0.100506648039149,Retained
+copy_number,RCC1,automatic,TRUE,0.251410687174119,Retained
+copy_number,TRNAU1AP,automatic,FALSE,0.973030128016064,Excluded: |correlation| >= 0.80 with a retained predictor
+copy_number,ME2,automatic,TRUE,0.371325098568434,Retained

@@ -1,7 +1,7 @@
 check,passed,detail
-Target in CRISPR matrix,TRUE,MDM2
+Target in CRISPR matrix,TRUE,PARP1
 Unique ModelID after multiomic joins,TRUE,1208
 At least 50 dependency observations,TRUE,1208
 At least 50 models with lineage annotation,TRUE,1208
-Expression has nonzero variance,TRUE,SD 1.289
-Copy number has nonzero variance,TRUE,SD 5.485
+Expression has nonzero variance,TRUE,SD 0.871
+Copy number has nonzero variance,TRUE,SD 0.296

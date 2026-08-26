@@ -1,0 +1,5 @@
+modality,gene,source,selected,maximum_absolute_correlation,reason
+mutation,TP53,automatic,TRUE,0.0346811886602518,Retained
+mutation,APC,automatic,TRUE,0.103068641473623,Retained
+copy_number,DEFB115,automatic,TRUE,0.192779587383595,Retained
+copy_number,BPIFB6,automatic,TRUE,0.707889753671673,Retained

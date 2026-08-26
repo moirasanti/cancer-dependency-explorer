@@ -1,0 +1,7 @@
+target: EGFR
+mutation:
+  - NF1
+  - PTEN
+copy_number:
+  - MET
+  - ERBB2

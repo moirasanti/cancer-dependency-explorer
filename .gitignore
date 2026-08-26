@@ -3,6 +3,7 @@
 .RData
 .Ruserdata
 .Rproj.user/
+*.code-workspace
 
 data/raw/
 data/processed/
