@@ -7,5 +7,7 @@ dependencies:
   - r-ggplot2>=3.5
   - r-rmarkdown>=2.29
   - r-knitr>=1.49
+  - r-dt>=0.34
+  - r-glmnet>=4.1
   - r-yaml>=2.3
   - pandoc>=3.6
