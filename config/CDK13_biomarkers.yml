@@ -1,0 +1,10 @@
+target: CDK13
+expression:
+  - CDK12
+  - CDK10
+mutation:
+  - CDK12
+  - CDK10
+copy_number:
+  - CDK12
+  - CDK10

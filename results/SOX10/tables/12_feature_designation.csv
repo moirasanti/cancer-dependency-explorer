@@ -1,0 +1,19 @@
+modality,feature,source,model_entry,predictors_entered,penalty_factor,reason
+expression,SOX10,target_characterization,Entered,1,1,Entered with the common molecular penalty
+mutation,SOX10,target_characterization,Omitted,0,,Omitted: fewer than 10 altered or 10 wild-type models
+copy_number,SOX10,target_characterization,Entered,1,1,Entered with the common molecular penalty
+expression,MITF,prespecified_hypothesis,Entered,1,1,Entered with the common molecular penalty
+expression,PAX3,prespecified_hypothesis,Entered,1,1,Entered with the common molecular penalty
+expression,TFAP2A,prespecified_hypothesis,Entered,1,1,Entered with the common molecular penalty
+expression,TYRO3,prespecified_hypothesis,Entered,1,1,Entered with the common molecular penalty
+expression,ERBB3,prespecified_hypothesis,Entered,1,1,Entered with the common molecular penalty
+expression,AXL,prespecified_hypothesis,Entered,1,1,Entered with the common molecular penalty
+mutation,NF1,prespecified_hypothesis,Entered,1,1,Entered with the common molecular penalty
+mutation,CDKN2A,prespecified_hypothesis,Entered,1,1,Entered with the common molecular penalty
+mutation,PTEN,prespecified_hypothesis,Entered,1,1,Entered with the common molecular penalty
+copy_number,MITF,prespecified_hypothesis,Entered,1,1,Entered with the common molecular penalty
+copy_number,EP300,prespecified_hypothesis,Entered,1,1,Entered with the common molecular penalty
+expression,Remaining eligible genome-wide features,genome_wide_candidate,Entered,19202,1,Entered with the same penalty as target and pre-specified-hypothesis features
+mutation,Remaining eligible genome-wide features,genome_wide_candidate,Entered,1717,1,Entered with the same penalty as target and pre-specified-hypothesis features
+copy_number,Remaining eligible genome-wide features,genome_wide_candidate,Entered,19141,1,Entered with the same penalty as target and pre-specified-hypothesis features
+annotation,Cancer lineage,lineage_adjustment,Entered,20,0,Entered without penalization to adjust for histological context

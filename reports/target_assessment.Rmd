@@ -11,11 +11,13 @@ params:
   target: "GENE"
   target_dir: "results/GENE"
   release: "DepMap Public"
+  biomarker_file: ""
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 target <- params$target
+config.file.label <- params$biomarker_file
 target.dir <- params$target_dir
 table.dir <- file.path(target.dir, "tables")
 figure.dir <- file.path(target.dir, "figures")
@@ -33,15 +35,38 @@ format_report_p_value <- function(x) {
   )
 }
 dependency <- read_report_table("04_dependency_summary.csv")
+modality.coverage <- read_report_table("01_modality_coverage.csv")
 lineage.global <- read_report_table("05_lineage_global_test.csv")
 lineages <- read_report_table("06_lineage_associations.csv")
-continuous <- read_report_table("07_target_continuous_associations.csv")
-mutations <- read_report_table("08_top_mutation_associations.csv")
-copy.number <- read_report_table("09_top_copy_number_associations.csv")
+target.associations <- read_report_table("07_target_associations.csv")
+expression <- read_report_table("08_top_expression_associations.csv")
+mutations <- read_report_table("09_top_mutation_associations.csv")
+copy.number <- read_report_table("10_top_copy_number_associations.csv")
+expression.all <- readRDS(file.path(target.dir, "intermediate", "expression_associations.rds"))
+mutation.all <- readRDS(file.path(target.dir, "intermediate", "mutation_associations.rds"))
 copy.number.all <- readRDS(file.path(target.dir, "intermediate", "copy_number_associations.rds"))
-selection.results <- read_report_table("10_biomarker_selection.csv")
-model.coefficients <- read_report_table("11_multivariable_model_coefficients.csv")
-model.performance <- read_report_table("12_model_performance.csv")
+special.features <- readRDS(file.path(target.dir, "intermediate", "special_features.rds"))
+lineage.specific <- read_report_table("11_lineage_specific_associations.csv")
+feature.designation <- read_report_table("12_feature_designation.csv")
+model.coefficients <- read_report_table("13_integrated_model_coefficients.csv")
+selection.stability <- read_report_table("14_selection_stability.csv")
+model.performance <- read_report_table("15_nested_cv_performance.csv")
+model.predictions <- read_report_table("16_nested_cv_predictions.csv")
+if (!"pearson_r" %in% names(model.performance)) {
+  model.performance$pearson_r <- vapply(
+    model.performance$repeat_id,
+    function(repeat.id) {
+      repeat.rows <- model.predictions$repeat_id == repeat.id
+      cor(
+        model.predictions$observed[repeat.rows],
+        model.predictions$predicted[repeat.rows],
+        use = "complete.obs", method = "pearson"
+      )
+    },
+    numeric(1)
+  )
+}
+lineage.performance <- read_report_table("17_lineage_cv_performance.csv")
 quality.checks <- read_report_table("02_data_quality_checks.csv")
 ```
 
@@ -49,50 +74,133 @@ This pipeline integrates CRISPR dependency with lineage, expression, copy number
 
 This report addresses the following question:
 
-**Which molecular features predict dependency on `r target` across cancer cell models?**
+**Which molecular features are associated with dependency on `r target`, and which exploratory molecular predictors are reproducible in held-out cancer cell line models?**
+
+In other words, the report first describes individual associations and then asks which eligible molecular features remain useful when every modality is considered jointly after adjustment for cancer lineage.
 
 The overall report narrative is structured as follows:
 
-- What does dependency on my gene look like?
-- Does it vary by cancer type?
-- Which molecular features are associated with it individually?
-- Which of those features still provide information when considered together?
+- Eligibility and data quality
+- Dependency distribution and cancer-lineage characterisation
+- Self-associations between the dependency of `r target` and its own expression, damaging mutation and copy number
+- Associations between the dependency of `r target` and pre-specified hypotheses, plus accountability for lineage-specific effects
+- Associations between the dependency of `r target` and genome-wide expression, damaging mutation and copy number
+- Integrated exploratory modelling
+- Nested cross-validation performance
 
-```{r prior-hypothesis-summary, results='asis'}
-retained.priors <- selection.results[
-  selection.results$source == "configured" & selection.results$selected,
-  ,
-  drop = FALSE
-]
+# How to read this report
 
-if (nrow(retained.priors)) {
-  prior.labels <- ifelse(
-    retained.priors$modality == "mutation",
-    paste0("**", retained.priors$gene, " damaging mutation**"),
-    paste0("**", retained.priors$gene, " copy number**")
-  )
+The purpose of this report is to explain why cancer cell line models differ in their dependency on **`r target`**, going from simple descriptions to an integrated analysis.
+First, it asks whether each measurement is reliable enough to analyse. It then shows what each feature does by itself, before allowing every eligible molecular feature to compete under the same regularization after adjustment for cancer lineage.
+The final results are a prioritisation of reproducible exploratory predictors.
 
-  cat(sprintf(
-    "This analysis included %s %s. A prior is a biological hypothesis chosen before the automatic search: it is carried into the combined model as long as it passes the basic data-eligibility checks. This ensures that the hypothesis is tested alongside the automatically discovered features, but does not assume that it will be statistically significant or biologically validated.\n",
-    paste(prior.labels, collapse = ", "),
-    if (nrow(retained.priors) == 1L) {
-      "as a user-specified prior hypothesis"
-    } else {
-      "as user-specified prior hypotheses"
-    }
-  ))
-} else {
-  cat("No eligible user-specified prior hypotheses were included in this analysis. The combined model therefore uses the target's standard features, cancer lineage and eligible features identified by the automatic screens.\n")
-}
-```
+The analysis has four layers:
+
+### 1. Eligibility: can the feature be analysed reliably?
+
+Eligibility is a data quality decision made before interpreting an association. Features are excluded when the available data cannot support the planned comparison. This is the first layer of data filtering and applies in all analyses.
+
+| Feature type | Eligibility rule | Biological/statistical reason |
+|---|---|---|
+| Expression | Observed in at least 80% of models with any expression-assay data and has nonzero variance | A feature needs sufficient coverage and variation within the assayed models to compare them meaningfully. |
+| Copy number | Observed in at least 80% of models with any copy-number-assay data and has nonzero variance | Sparse or constant measurements within the assayed models cannot support a reliable correlation. |
+| Damaging mutation | At least 10 altered and 10 wild type models | Both biological groups must be represented well enough for an altered-versus-wild type comparison. |
+
+As per the data, there are three types of features described below. These modality rules apply equally to all three roles:
+
+- **Target-characterisation features:** `r target` expression, damaging mutation and copy number.
+- **Pre-specified hypotheses:** features supplied in `r if (nzchar(config.file.label)) config.file.label else "an optional biomarker YAML file"` are nominated before modelling from existing biological knowledge. YAML designation does not override insufficient coverage, zero variance or the mutation 10/10 rule.
+- **Genome-wide candidates:** every other expression, mutation and copy number feature that passes the same basic modality-specific eligibility rule enters the integrated molecular search.
+
+### 2. Univariate association: what does each feature show by itself?
+
+The univariate screen asks: **is this feature associated with `r target` dependency when considered on its own?** For example, it tests whether `r target` Chronos scores increases or decreases with Gene X expression, or whether models carrying a damaging Gene X mutation have different `r target` dependency scores from Gene X wild type models.
+
+- Expression uses a Spearman correlation, making it less sensitive to extreme values and distributional assumptions. Negative correlation indicates stronger dependency as expression increases.
+- Damaging mutations use R's built-in unequal-variance Welch t-test to compare mean dependency in altered and wild type models. The mean difference, 95% confidence interval and P value come from the same test.
+- Copy number uses Pearson correlation, which is appropriate for continuous measurements that are approximately normally distributed.
+
+FDR is calculated per modality. An expression result is considered notable when FDR < 0.05 and |Spearman rho| >= 0.30; a copy number result requires FDR < 0.05 and |Pearson r| >= 0.30; a mutation result requires FDR < 0.05. These thresholds identify significant associations only.
+
+### 3. Predictor designation: how is each eligible feature treated?
+
+After eligibility is established, the integrated model treats every eligible molecular feature equally, without privileging a particular modality or pre-specified hypothesis. The model uses elastic-net regularization to select a subset of features that reproducibly predict `r target` dependency in held-out cell line models.
+
+- **Target characterisation:** eligible `r target` expression, damaging mutation and copy number describe the molecular state of the target.
+- **Pre-specified hypothesis:** eligible YAML features represent hypotheses nominated before modelling from biological knowledge.
+- **Genome-wide candidate:** every other eligible expression, mutation and copy-number feature.
+- **Lineage adjustment:** cancer-lineage indicators account for broad histological differences that could otherwise make a molecular feature appear associated simply because it is enriched in a more- or less-dependent lineage.
+
+Every eligible molecular feature enters with penalty factor 1 and can be reduced to zero. Only lineage indicators receive penalty factor 0.
+
+### 4. Integrated exploratory model: what remains useful when the data are considered together?
+
+The integrated model asks: **after adjusting for cancer lineage, which eligible molecular features contribute reproducibly to prediction of `r target` dependency when all molecular measurements compete under the same regularization?**
+
+The parameter choices are:
+
+- **Gaussian model:** Chronos dependency is a continuous numerical measurement, so the model predicts a number rather than a category.
+- **Elastic net balance (`alpha = 0.5`):** this is a middle ground balance between selecting a small set of features and retaining groups of correlated biological features that may be correlated and carry similar information.
+- **One SD lambda:** several model sizes may predict almost equally well. This rule chooses the simpler, more strongly regularized model when its estimated error is still statistically comparable to the best performing model.
+- **Nested cross-validation:** the same training portion is used for feature selection and parameter choice, and the outer held-out portion is used to estimate performance. This avoids overfitting and data leakage.
+- **Repeated folds:** repeating the five-fold analysis three times reduces dependence on one arbitrary division of the dataset.
+
+<details class="model-construction-details">
+<summary><strong>Read more details on the model construction</strong></summary>
+
+<div class="model-details-box">
+
+In concrete terms, each repeat divides the cell line models into five lineage-balanced outer folds, which can be called A–E. The model is trained on A–D and tested on E, then trained on A–C plus E and tested on D, continuing until each fold has served as the test set once. Within every four-fold training portion, a separate five-fold inner cross-validation chooses the one-standard-error lambda; the outer test fold is not used for preprocessing, feature selection or parameter choice. The full A–E assignment is then reshuffled, while preserving lineage balance, and the process is repeated twice more. Thus, the procedure produces 15 outer fitted models and three complete sets of held-out predictions, one set per repeat.
+
+The results are collated in three ways:
+
+- **Held-out performance:** within each repeat, the five outer test-fold predictions are joined so every cell model has one held-out prediction. Pearson r, RMSE and R² are calculated for that complete prediction set. The report then summarizes their variation across the three repeats.
+- **Molecular feature stability:** for each molecular feature, selection is counted across all 15 outer models. Selection frequency is the number of nonzero coefficients divided by 15. Direction concordance is the proportion of the feature's nonzero coefficients that agree with its most common direction.
+- **Full-data fit and reported stable set:** the same model specification is fitted once more using all eligible cell line models, with inner cross-validation choosing `lambda.1se`. A molecular feature is reported as stable only when its outer-model selection frequency is at least 60%, its direction concordance is at least 80%, and its coefficient is also nonzero in this full-data fit. The displayed coefficient comes from that fit, and the stable set is a reporting filter, not a second refitted model.
+
+<div class="stability-callout">
+
+A molecular feature is called stable only if it is selected in at least 60% of outer models, has the same coefficient direction in at least 80% of models in which it is selected, and remains nonzero in the full-data fit.
+
+The report therefore presents selection frequency, direction concordance and nested-CV Pearson r, RMSE and R². Stable genes are exploratory molecular predictors associated with `r target` dependency ready to follow-up in future experiments.
+
+</div>
+
+</div>
+
+</details>
+
+---
 
 # Data quality
+
+This section establishes if the data are sufficient to run the planned analyses using data extracted from the DepMap Public release.
 
 ```{r quality-table}
 knitr::kable(quality.checks, caption = "Pre-analysis data-quality checks")
 ```
 
 `r sum(quality.checks$passed)` of `r nrow(quality.checks)` checks passed (a failed check is retained in this report but critical failures stop the workflow ahead of modelling).
+
+```{r modality-coverage-interpretation, results='asis'}
+expression.coverage <- modality.coverage[
+  modality.coverage$modality == "expression",
+]
+copy.number.coverage <- modality.coverage[
+  modality.coverage$modality == "copy_number",
+]
+cat(sprintf(
+  "Expression-assay measurements were available for **%d of %d models (%.1f%%)**, and copy-number measurements for **%d of %d models (%.1f%%)**. The 80%% feature-level eligibility threshold is evaluated among models with any data from the corresponding assay, rather than across all dependency models. Models without that assay remain in the integrated analysis; their missing molecular values are replaced using medians learned from the relevant training fold.\n",
+  expression.coverage$observed,
+  expression.coverage$total_dependency_models,
+  100 * expression.coverage$proportion,
+  copy.number.coverage$observed,
+  copy.number.coverage$total_dependency_models,
+  100 * copy.number.coverage$proportion
+))
+```
+
+---
 
 # Dependency distribution
 
@@ -104,9 +212,12 @@ knitr::include_graphics(file.path(figure.dir, "01_dependency_distribution.png"))
 
 Across `r dependency$n` models, the median `r target` Chronos score was `r format_report_number(dependency$median)`. The proportion of cell lines with Chronos scores below -0.5 (what is generally considered as *strong dependency*) was `r sprintf("%.1f%%", 100 * dependency$proportion_below_minus_0_5)`.
 
+---
+
 # Lineage specificity
 
-Cancer types can differ in which genes they require for survival. Before examining individual molecular biomarkers, the question is whether `r target` dependency is concentrated in particular cancer lineages. The plot shows the size and direction of these differences, while the global Kruskal–Wallis test evaluates if there is evidence of an overall lineage association.
+Cancer types can differ in which genes they require for survival. Before examining individual molecular features, the question is whether `r target` dependency is concentrated in particular cancer lineages.
+The plot below shows the size and direction of these differences, while the global Kruskal–Wallis test evaluates if there is evidence of an overall lineage association.
 
 ```{r lineage-global-interpretation, results='asis'}
 if (is.na(lineage.global$p_value)) {
@@ -119,7 +230,7 @@ if (is.na(lineage.global$p_value)) {
   ))
 } else {
   cat(sprintf(
-    "The global comparison found **no clear evidence that %s dependency differs across cancer lineages** (Kruskal–Wallis P = %s). No lineage should therefore be considered a distinct dependency context on the basis of this overall test.\n",
+    "The global comparison found **no clear evidence that %s dependency differs across cancer lineages** (Kruskal–Wallis P = %s). On the basis of this overall test, no lineage should be considered a 'distinct dependency context'.\n",
     target,
     format_report_p_value(lineage.global$p_value)
   ))
@@ -130,7 +241,7 @@ if (is.na(lineage.global$p_value)) {
 knitr::include_graphics(file.path(figure.dir, "02_lineage_dependency.png"))
 ```
 
-To identify which lineages may contribute to this variation, each lineage was compared with all other eligible models combined. The table reports the leading lineage-versus-rest results; negative median differences indicate stronger dependency in that lineage, whereas positive differences indicate weaker dependency.
+To identify which lineages may contribute to this variation, each lineage was compared with all other eligible lineages combined. The table reports the leading lineage-versus-rest results. Negative **median differences** indicate stronger dependency in that lineage, whereas positive differences indicate weaker dependency.
 
 ```{r lineage-table}
 knitr::kable(head(lineages[order(lineages$fdr), ], 10), digits = 3, caption = "Leading lineage associations")
@@ -141,12 +252,12 @@ significant.lineages <- lineages[!is.na(lineages$fdr) & lineages$fdr < 0.05, ]
 
 if (is.na(lineage.global$p_value) || lineage.global$p_value >= 0.05) {
   cat(sprintf(
-    "There was no clear evidence that **%s dependency varies by lineage**. The lineage-versus-rest estimates are therefore descriptive, and no particular lineage should be treated as a lineage-specific dependency context.\n",
+    "There was no clear evidence that **%s dependency varies by lineage**. No particular lineage should be treated as a lineage-specific dependency context.\n",
     target
   ))
 } else if (!nrow(significant.lineages)) {
   cat(sprintf(
-    "The global test suggests that **%s dependency varies across lineages**, but no individual lineage-versus-rest comparison remained significant after FDR correction. The data therefore support overall lineage variation without identifying a specific contributing lineage.\n",
+    "The global test suggests that **%s dependency varies across lineages**, but no individual lineage-versus-rest comparison remained significant after FDR correction. The data supports overall lineage variation without identifying a specific contributing lineage.\n",
     target
   ))
 } else {
@@ -172,7 +283,7 @@ if (is.na(lineage.global$p_value) || lineage.global$p_value >= 0.05) {
       collapse = " and "
     )
     cat(sprintf(
-      "%s contributed to the lineage association through more-negative dependency scores than the remaining models, indicating stronger **%s dependency** in those cancer contexts. ",
+      "%s contributed to the lineage association through more-negative dependency scores than the remaining models, indicating **stronger %s dependency** in those cancer contexts. ",
       stronger.text,
       target
     ))
@@ -193,7 +304,7 @@ if (is.na(lineage.global$p_value) || lineage.global$p_value >= 0.05) {
       collapse = " and "
     )
     cat(sprintf(
-      "Conversely, %s contributed through more-positive scores, indicating weaker **%s dependency** relative to the remaining models. ",
+      "%s contributed through more-positive scores, indicating **weaker %s dependency** relative to the remaining models. ",
       weaker.text,
       target
     ))
@@ -203,125 +314,367 @@ if (is.na(lineage.global$p_value) || lineage.global$p_value >= 0.05) {
 }
 ```
 
-Note: Lineage associations may reflect molecular features that are enriched in particular histologies. For example, an apparent mutation–`r target` dependency association could partly arise because the mutation is common in a lineage that is already more dependent on `r target`. The multivariable linear regression therefore adjusts for lineage to reduce this potential confounding when estimating molecular associations.
+<div class="stability-callout">
 
+Interpretation note: Lineage associations may reflect molecular features enriched in particular histologies. For example, an apparent association between Gene X mutation and `r target` dependency could partly arise because the mutation is common in a lineage already more dependent on `r target`. The integrated model therefore forces lineage indicators into every fit to reduce this potential confounding.
 
-# Target expression and copy number
-Once the lineage is accounted for, the next question is whether the target's own expression or copy number is associated with dependency. The following figure shows the relationship between `r target` dependency and its expression and copy number.
+</div>
+
+---
+
+# Target characterisation
+
+Next, the selected target `r target`'s expression, damaging mutation status and copy number were evaluated for association with `r target` dependency. The table below shows the corresponding statistical results.
+
+The plot below shows the correlation between dependency and the target's own expression.
+
+```{r target-association-table}
+target.associations.display <- target.associations[, c(
+  "feature", "test", "n", "estimate_type", "estimate",
+  "p_value", "fdr", "eligible"
+)]
+names(target.associations.display) <- c(
+  "Feature", "Test", "N", "Estimate type", "Estimate",
+  "P value", "FDR", "Eligible"
+)
+knitr::kable(
+  target.associations.display,
+  digits = 3,
+  caption = paste(target, "molecular-state associations with dependency")
+)
+```
+
+For the expression and copy number rows, a negative correlation indicates stronger dependency as the measurement increases. For the mutation row, a negative estimate indicates stronger dependency in models carrying a damaging mutation. These are unadjusted associations and may reflect lineage or other correlated molecular features.
 
 ```{r expression-figure, out.width='90%', fig.align='center'}
 knitr::include_graphics(file.path(figure.dir, "03_expression_dependency.png"))
 ```
 
-`r paste(sprintf("%s showed Spearman rho %s (P = %s)", continuous$feature, format_report_number(continuous$spearman_rho), format_report_p_value(continuous$p_value)), collapse = "; ")`.
+<details>
+<summary><strong>Interpretations</strong></summary>
+<br>
+**Expression**
 
-```{r continuous-interpretation, results='asis'}
-# Use a pragmatic descriptive threshold: |rho| 0.30-0.49 is moderate and
-# |rho| >= 0.50 is large. Statistical evidence alone is not treated as a
-# biologically substantial relationship when the correlation is small.
-notable.continuous <- continuous[
-  !is.na(continuous$p_value) &
-    continuous$p_value < 0.05 &
-    abs(continuous$spearman_rho) >= 0.30,
-]
+A negative expression–dependency correlation can indicate that cells hyperexpressing `r target` are more reliant on it (sometimes called an expression-linked dependency or “addiction”). This may suggest that the active pathway or cellular state marked by high expression requires that gene.
 
-if (nrow(notable.continuous)) {
-  for (association.index in seq_len(nrow(notable.continuous))) {
-    association <- notable.continuous[association.index, ]
-    association.strength <- if (
-      abs(association$spearman_rho) >= 0.50
-    ) "large" else "moderate"
-    correlation.direction <- if (
-      association$spearman_rho < 0
-    ) "negative" else "positive"
-    dependency.direction <- if (
-      association$spearman_rho < 0
-    ) "stronger" else "weaker"
+A positive correlation means highly expressing cells are less sensitive to knockout. This could reflect compensatory expression, association with a resistant lineage, or stronger dependency among low-expression cells.
 
-    biological.interpretation <- if (association$modality == "expression") {
-      if (association$spearman_rho < 0) {
-        paste0(
-          "Higher ", target,
-          " expression may therefore mark models that rely more strongly on ",
-          target, " function."
-        )
-      } else {
-        paste0(
-          "Higher ", target,
-          " expression may therefore mark a relatively less-dependent state."
-        )
-      }
-    } else if (association$spearman_rho < 0) {
-      paste0(
-        "Higher ", target,
-        " copy number may therefore mark a copy-number-associated dependency."
-      )
-    } else {
-      paste0(
-        "Higher ", target,
-        " copy number may therefore mark a relatively less-dependent state."
-      )
-    }
+**Damaging mutations**
 
-    cat(sprintf(
-      "**%s showed a %s %s correlation** with dependency (rho %s; P %s), corresponding to %s dependency as the feature increased. %s ",
-      association$feature,
-      association.strength,
-      correlation.direction,
-      format_report_number(association$spearman_rho),
-      format_report_p_value(association$p_value),
-      dependency.direction,
-      biological.interpretation
+If $\Delta$ (altered - wild type) < 0, cells carrying a damaging mutation are more dependent on that gene. This may indicate that the mutation is activating, dominant negative, or otherwise sensitising.
+
+If $\Delta$ (altered - wild type) > 0, mutated cells are less dependent on the target. This may indicate pathway redundancy, target-pathway inactivation, or resistance.
+
+For a gene’s mutation versus its own dependency, a positive difference is often biologically plausible: if the gene is already functionally inactivated, CRISPR knockout may have little additional effect.
+
+**Copy number**
+
+A negative correlation means higher copy number is associated with stronger target dependency. For the target’s own copy number, this can suggest an amplification-associated dependency: amplified cells may become reliant on the overactive or overexpressed target.
+
+A positive correlation means higher copy number is associated with weaker dependency, or equivalently, lower copy number cells are more dependent. This might reflect vulnerability after partial deletion, dosage-sensitive biology, lineage differences, or genomic features linked to the copy number event.
+
+</details>
+
+---
+
+# Pre-specified hypotheses
+
+`r if (nzchar(config.file.label)) paste0("Features listed in **", config.file.label, "** are") else "Features supplied through an optional biomarker YAML file are"` pre-specified hypotheses nominated before modelling from existing biological knowledge. Their designation makes their results easy to follow but does not force them into the fitted result or change their penalty. Each eligible hypothesis competes on equal terms with every other molecular feature (see [3. Predictor designation: how is each eligible feature treated?](#predictor-designation-how-is-each-eligible-feature-treated)). Their pan-cancer results are shown below under each nominated gene.
+
+```{r prespecified-association-data, include=FALSE}
+empty.special.associations <- data.frame(
+  Gene = character(),
+  Feature = character(),
+  Modality = character(),
+  Test = character(),
+  N = character(),
+  `Estimate type` = character(),
+  Estimate = numeric(),
+  `P value` = numeric(),
+  FDR = numeric(),
+  Eligible = logical(),
+  check.names = FALSE
+)
+make.special.associations <- function(modality, genes) {
+  if (!length(genes)) return(empty.special.associations)
+  if (modality == "expression") {
+    rows <- expression.all[match(genes, expression.all$gene), ]
+    return(data.frame(
+      Gene = genes,
+      Feature = paste(genes, "expression"),
+      Modality = "Expression",
+      Test = "Spearman correlation",
+      N = as.character(rows$n),
+      `Estimate type` = "Spearman rho",
+      Estimate = rows$spearman_rho,
+      `P value` = rows$p_value,
+      FDR = rows$fdr,
+      Eligible = rows$eligible,
+      check.names = FALSE
     ))
   }
-  cat("These univariate patterns are hypothesis-generating and may partly reflect lineage or other correlated molecular features; the multivariable linear regression evaluates them together.\n")
+  if (modality == "mutation") {
+    rows <- mutation.all[match(genes, mutation.all$gene), ]
+    return(data.frame(
+      Gene = genes,
+      Feature = paste(genes, "damaging mutation"),
+      Modality = "Mutation",
+      Test = "Welch mean comparison",
+      N = sprintf("%s altered / %s wild type", rows$altered_n, rows$reference_n),
+      `Estimate type` = "Altered minus wild type",
+      Estimate = rows$effect,
+      `P value` = rows$p_value,
+      FDR = rows$fdr,
+      Eligible = rows$eligible,
+      check.names = FALSE
+    ))
+  }
+  rows <- copy.number.all[match(genes, copy.number.all$gene), ]
+  data.frame(
+    Gene = genes,
+    Feature = paste(genes, "copy number"),
+    Modality = "Copy number",
+    Test = "Pearson correlation",
+    N = as.character(rows$n),
+    `Estimate type` = "Pearson r",
+    Estimate = rows$correlation,
+    `P value` = rows$p_value,
+    FDR = rows$fdr,
+    Eligible = rows$eligible,
+    check.names = FALSE
+  )
+}
+prespecified.associations <- rbind(
+  make.special.associations(
+    "expression", special.features$configured$expression
+  ),
+  make.special.associations(
+    "mutation", special.features$configured$mutation
+  ),
+  make.special.associations(
+    "copy_number", special.features$configured$copy_number
+  )
+)
+```
+
+```{r prespecified-association-table, results='asis'}
+if (nrow(prespecified.associations)) {
+  for (hypothesis.gene in unique(prespecified.associations$Gene)) {
+    hypothesis.rows <- prespecified.associations[
+      prespecified.associations$Gene == hypothesis.gene,
+      setdiff(names(prespecified.associations), "Gene"),
+      drop = FALSE
+    ]
+    cat(sprintf("\n## %s\n\n", hypothesis.gene))
+    print(knitr::kable(
+      hypothesis.rows,
+      digits = 3,
+      caption = paste(hypothesis.gene, "molecular-state associations with", target, "dependency")
+    ))
+    cat("\n")
+  }
 } else {
-  statistically.significant <- continuous[
-    !is.na(continuous$p_value) & continuous$p_value < 0.05,
-  ]
-  if (nrow(statistically.significant)) {
-    cat(sprintf(
-      "No target expression or copy-number correlation was both statistically significant and at least moderate in magnitude (|rho| >= 0.30). Although %s showed statistically detectable correlations, their small effect sizes provide limited evidence that either feature alone strongly distinguishes `%s`-dependent models.\n",
-      paste(statistically.significant$feature, collapse = " and "),
-      target
-    ))
-  } else {
-    cat(sprintf(
-      "No statistically significant correlation was found between `%s` dependency and its own expression or copy number. In this dataset, neither target-level feature alone clearly distinguishes more-dependent from less-dependent models.\n",
-      target
-    ))
-  }
+  cat("NB: No pre-specified hypotheses were supplied for this analysis.\n")
 }
 ```
 
+---
+
+# Lineage-specific molecular associations
+
+An additional layer of the analysis computes associations between `r target` dependency and its target-characterisation features, and between `r target` dependency and the pre-specified hypotheses, but this time within each cancer lineage. This evaluates whether a pancancer association may be driven by lineage composition and identifies the lineages in which it is supported.
+
+The combined table below retains both estimable and non-estimable target/pre-specified-hypothesis rows (sorted by FDR). When a lineage lacks enough models, variation or mutation group stratification, the *Reason* column explains why no estimate or FDR is available.
+
+<details>
+<summary><strong>Target and pre-specified-hypothesis associations within lineages, ordered by FDR</strong></summary>
+<br>
+
+```{r lineage-specific-table}
+lineage.specific.display <- lineage.specific[, c(
+  "family", "feature", "modality", "lineage", "n", "altered_n",
+  "reference_n", "estimate_type", "estimate", "fdr", "conf_low",
+  "conf_high", "p_value", "estimable", "reason"
+)]
+lineage.specific.display$family <- c(
+  target_characterization = "Target characterisation",
+  prespecified_hypothesis = "Pre-specified hypothesis"
+)[lineage.specific.display$family]
+lineage.specific.display$modality <- c(
+  expression = "Expression",
+  mutation = "Damaging mutation",
+  copy_number = "Copy number"
+)[lineage.specific.display$modality]
+names(lineage.specific.display) <- c(
+  "Source", "Feature", "Modality", "Lineage", "N", "Altered N",
+  "Wild type N", "Estimate type", "Estimate", "FDR", "95% CI low",
+  "95% CI high", "P value", "Estimable", "Reason"
+)
+lineage.specific.display <- lineage.specific.display[
+  order(
+    is.na(lineage.specific.display$FDR),
+    lineage.specific.display$FDR,
+    lineage.specific.display$`P value`,
+    lineage.specific.display$Feature,
+    lineage.specific.display$Lineage
+  ),
+]
+# DataTables otherwise treats blank FDR values inconsistently during client-side
+# sorting. Use an invisible value above the valid FDR range so blanks sort last.
+lineage.specific.display$`FDR sort` <- ifelse(
+  is.na(lineage.specific.display$FDR),
+  2,
+  lineage.specific.display$FDR
+)
+lineage.specific.display$FDR <- ifelse(
+  is.na(lineage.specific.display$FDR),
+  "NA",
+  formatC(lineage.specific.display$FDR, format = "f", digits = 3)
+)
+lineage.specific.widget <- DT::datatable(
+  lineage.specific.display,
+  rownames = FALSE,
+  options = list(
+    pageLength = 10,
+    lengthMenu = c(10, 25, 50),
+    searching = FALSE,
+    scrollX = TRUE,
+    autoWidth = TRUE,
+    order = list(list(9, "asc")),
+    columnDefs = list(
+      list(targets = 15, visible = FALSE, searchable = FALSE),
+      list(targets = 9, orderData = 15)
+    )
+  )
+)
+DT::formatRound(
+  lineage.specific.widget,
+  columns = c("Estimate", "95% CI low", "95% CI high", "P value"),
+  digits = 3
+)
+```
+
+</details>
+
+```{r lineage-specific-highlights, results='asis'}
+significant.feature.lineages <- lineage.specific[
+  lineage.specific$estimable &
+    !is.na(lineage.specific$fdr) &
+    lineage.specific$fdr < 0.05,
+]
+if (nrow(significant.feature.lineages)) {
+  cat("\n**The following association(s) passed the 5% lineage-specific FDR threshold:**\n\n")
+  for (i in seq_len(nrow(significant.feature.lineages))) {
+    result <- significant.feature.lineages[i, ]
+    dependency.direction <- if (result$estimate < 0) "stronger" else "weaker"
+    feature.contrast <- if (result$modality == "mutation") {
+      "change in Chronos score in altered versus wild type models"
+    } else {
+      "change in Chronos score per 1 overall SD increase"
+    }
+    cat(sprintf(
+      "- **%s was associated with %s %s dependency in %s** (estimate %s %s; 95%% CI %s to %s; FDR %s).\n",
+      result$feature,
+      dependency.direction,
+      target,
+      result$lineage,
+      format_report_number(result$estimate),
+      feature.contrast,
+      format_report_number(result$conf_low),
+      format_report_number(result$conf_high),
+      format_report_p_value(result$fdr)
+    ))
+  }
+} else {
+  cat(sprintf(
+    "No target self-association or pre-specified hypotheses were associated with %s dependency within a named lineage after 5%% FDR correction.\n",
+    target
+  ))
+}
+```
+
+---
+
 # Genomic associations
 
-Having assessed lineage and the target's own expression and copy number, the following sections compute associations with damaging mutations and copy-number measurements across the whole genome.
+The following sections show the leading genes from the complete genome-wide univariate screens. The aim is to identify genome-wide molecular features flagging models with stronger or weaker `r target` dependency.
 
-The aim is to identify molecular features that flag models with stronger or weaker `r target` dependency and to nominate a small candidate set for the multivariable linear regression. These are one-feature-at-a-time screens, so correlated or lineage-associated findings are evaluated together later.
+Look out for coloured points for each modality in the plots below indicating features that passed the thresholds for significance (FDR < 0.05 and |rho| >= 0.30 for expression, FDR < 0.05 for mutation, and FDR < 0.05 and |r| >= 0.30 for copy number).
+
+### Gene expression
+
+```{r genome-expression-figure, out.width='90%', fig.align='center'}
+knitr::include_graphics(file.path(figure.dir, "04_expression_associations.png"))
+```
+
+```{r genome-expression-text, results='asis'}
+eligible.expression <- expression.all[
+  expression.all$eligible &
+    is.finite(expression.all$spearman_rho),
+]
+notable.expression <- eligible.expression[
+  !is.na(eligible.expression$fdr) &
+    eligible.expression$fdr < 0.05 &
+    abs(eligible.expression$spearman_rho) >= 0.30,
+]
+
+if (!nrow(notable.expression)) {
+  cat(sprintf(
+    "No genome-wide expression correlation was both significant at 5%% FDR and at least moderate in magnitude (|rho| >= 0.30). This screen found no substantial expression association with `%s` dependency.\n",
+    target
+  ))
+} else {
+  top.expression <- notable.expression[1, ]
+  expression.strength <- top.expression$correlation_strength
+  dependency.direction <- if (
+    top.expression$spearman_rho < 0
+  ) "stronger" else "weaker"
+  cat(sprintf(
+    "The leading qualifying expression association was **%s** (a %s correlation; rho %s; FDR %s), corresponding to %s `%s` dependency as expression increased.\n",
+    top.expression$gene,
+    expression.strength,
+    format_report_number(top.expression$spearman_rho),
+    format_report_p_value(top.expression$fdr),
+    dependency.direction,
+    target
+  ))
+}
+```
+
+<details>
+<summary><strong>View detailed expression results</strong></summary>
+
+```{r genome-expression-table}
+knitr::kable(head(expression, 10), digits = 3, caption = "Top genome-wide expression associations")
+```
+
+</details>
 
 ### Damaging mutations
 
 ```{r mutation-figure, out.width='90%', fig.align='center'}
-knitr::include_graphics(file.path(figure.dir, "04_mutation_associations.png"))
+knitr::include_graphics(file.path(figure.dir, "05_mutation_associations.png"))
 ```
 
 ```{r mutation-text, results='asis'}
 significant.mutations <- mutations[!is.na(mutations$fdr) & mutations$fdr < 0.05, ]
 if (nrow(significant.mutations)) {
   top.mutation <- significant.mutations[1, ]
-  cat(sprintf("The leading mutation association was **%s** (mean Chronos difference, altered vs reference/wild type: %s, FDR %s) (a negative difference denotes stronger `%s` dependency in defective/altered models).\n",
+  cat(sprintf("The leading mutation association was **%s** (mean Chronos difference, altered vs wild type: %s, FDR %s) (a negative difference denotes stronger `%s` dependency in defective/altered models).\n",
               top.mutation$gene, format_report_number(top.mutation$effect), format_report_p_value(top.mutation$fdr), target))
-} else cat("No damaging-mutation feature passed the pre-specified 5% FDR threshold, meaning no mutations in any gene were found to be significantly associated with `%s` dependency.\n", target)
+} else cat(sprintf(
+  "No damaging mutation feature passed the pre-specified 5%% FDR threshold, meaning no mutations in any gene were found to be significantly associated with `%s` dependency.\n",
+  target
+))
 ```
 
-The plot summarises the leading mutation associations. Expand the section below to inspect altered and reference group sizes, mean dependency scores and statistical results.
+The plot above summarises the leading mutation associations. Points show altered-minus-wild-type mean differences and error bars show their Welch 95% confidence intervals. Expand the section below to inspect altered and wild type group sizes, mean dependency scores and statistical results.
 
 <details>
 <summary><strong>View detailed mutation results</strong></summary>
 
 ```{r mutation-table}
-knitr::kable(head(mutations, 10), digits = 3, caption = "Top damaging-mutation associations")
+knitr::kable(head(mutations, 10), digits = 3, caption = "Top damaging mutation associations")
 ```
 
 </details>
@@ -329,19 +682,20 @@ knitr::kable(head(mutations, 10), digits = 3, caption = "Top damaging-mutation a
 ### Copy number
 
 ```{r copy-figure, out.width='90%', fig.align='center'}
-knitr::include_graphics(file.path(figure.dir, "05_copy_number_associations.png"))
+knitr::include_graphics(file.path(figure.dir, "06_copy_number_associations.png"))
 ```
 
 ```{r copy-text, results='asis'}
 significant.copy.number <- copy.number[!is.na(copy.number$fdr) & copy.number$fdr < 0.05, ]
 if (nrow(significant.copy.number)) {
   top.copy.number <- significant.copy.number[1, ]
-  cat(sprintf("The leading copy-number association was **%s** (correlation %s, FDR %s).\n",
-              top.copy.number$gene, format_report_number(top.copy.number$correlation), format_report_p_value(top.copy.number$fdr)))
-} else cat("No copy-number feature passed the pre-specified 5% FDR threshold.\n")
+  cat(sprintf("The leading copy number association was **%s** (a %s correlation; r %s; FDR %s).\n",
+              top.copy.number$gene, top.copy.number$correlation_strength, format_report_number(top.copy.number$correlation), format_report_p_value(top.copy.number$fdr)))
+} else cat("No copy number feature passed the pre-specified 5% FDR threshold.\n")
 
 eligible.copy.number <- copy.number.all[
-  copy.number.all$eligible & is.finite(copy.number.all$correlation),
+  copy.number.all$eligible &
+    is.finite(copy.number.all$correlation),
 ]
 notable.copy.number <- eligible.copy.number[
   !is.na(eligible.copy.number$fdr) &
@@ -351,7 +705,7 @@ notable.copy.number <- eligible.copy.number[
 
 if (!nrow(notable.copy.number)) {
   cat(sprintf(
-    "No genome-wide copy-number correlation was both significant at 5%% FDR and at least moderate in magnitude (|r| >= 0.30). Thus, this screen found no substantial copy-number association with either stronger or weaker `%s` dependency.\n",
+    "No genome-wide copy number correlation was both significant at 5%% FDR and at least moderate in magnitude (|r| >= 0.30). This screen found no substantial copy number association with either stronger or weaker `%s` dependency.\n",
     target
   ))
 } else {
@@ -379,133 +733,476 @@ if (!nrow(notable.copy.number)) {
 }
 ```
 
-# Multivariable linear regression
-The earlier sections examined lineage, expression, copy number and mutations separately. We now combine these results in an ordinary multivariable linear regression to identify which molecular features still distinguish more- from less-`r target`-dependent models after accounting for the others. Cancer lineage is included to account for differences between cancer types, but is omitted from the plot so the molecular results remain easy to read.
+The plot above summarises the leading copy number associations. Pink points pass both the 5% FDR threshold and |Pearson r| >= 0.30; grey points fail one or both criteria. Expand the section below to inspect coverage, correlation magnitude and statistical results.
 
-The regression does not include every feature from the genome-wide screens. It contains:
+<details>
+<summary><strong>View detailed copy number results</strong></summary>
 
-- **Target expression and target copy number**, which are always included as broadly measured features of the selected target.
-- **Cancer lineage**, which is included for adjustment but omitted from the molecular plot.
-- Any eligible biomarkers supplied in the optional hypothesis file.
-- Up to two automatic mutation and two automatic copy-number discoveries that pass their screening FDR and redundancy filters.
-
-Automatic mutation discoveries require at least 10 altered and 10 reference models. Automatic copy-number discoveries require at least 80% coverage and nonzero variance. Both must pass FDR < 0.05, and an automatic feature is skipped if its absolute correlation with a retained predictor is at least 0.80.
-
-**Target-gene mutation is not automatically included in the regression.** The pipeline first compares target dependency between cell lines with and without a damaging mutation in the target itself. If enough cell lines are available and this comparison passes the automatic-selection rules, target mutation is included. It may also be included as a user-specified prior, provided there are at least 10 altered and 10 reference models.
-
-Points to the left indicate stronger dependency and points to the right indicate weaker dependency. Features are ordered by their model FDR; pink points pass the 5% FDR threshold. The bars show HC3-adjusted 95% confidence intervals.
-
-Each point is a coefficient from the ordinary linear regression: the estimated change in the `r target` Chronos score associated with that feature while the other features and lineage are held constant. For expression and copy number, 1 SD higher means one standard deviation above another model; damaging mutations compare altered with reference models. A confidence interval crossing zero means the direction remains uncertain.
-
-```{r coefficient-figure, out.width='90%', fig.align='center'}
-knitr::include_graphics(file.path(figure.dir, "06_multivariable_coefficients.png"))
+```{r copy-table}
+knitr::kable(head(copy.number, 10), digits = 3, caption = "Top copy number associations")
 ```
 
-```{r model-performance-text, results='asis'}
-cat(sprintf(
-  "The ordinary linear regression combined lineage and molecular data from **%d cell models**. ",
-  model.performance$n
-))
+</details>
 
-if (!is.na(model.performance$adjusted_r_squared) &&
-    model.performance$adjusted_r_squared >= 0) {
+---
+
+# Feature designation for integrated exploratory multiomic modelling
+
+The table below audits the predictors given to the model. Every feature passing the eligibility checks enters the integrated model. Lineage indicators are adjustment covariates and remain in the model always.
+
+```{r feature-designation-table}
+feature.designation.display <- feature.designation
+feature.designation.display$modality <- unname(c(
+  expression = "Expression",
+  mutation = "Damaging mutation",
+  copy_number = "Copy number",
+  annotation = "Annotation"
+)[feature.designation.display$modality])
+feature.designation.display$source <- unname(c(
+  target_characterization = "Target characterisation",
+  prespecified_hypothesis = "Pre-specified hypothesis",
+  genome_wide_candidate = "Genome-wide candidate",
+  lineage_adjustment = "Lineage adjustment"
+)[feature.designation.display$source])
+names(feature.designation.display) <- c(
+  "Modality", "Feature", "Source", "Model entry",
+  "Predictors entered", "Penalty factor", "Reason"
+)
+knitr::kable(
+  feature.designation.display,
+  caption = "Predictors supplied to the integrated exploratory model"
+)
+```
+
+# Integrated exploratory model
+
+This model asks which molecular features help predict `r target` dependency when the data are considered together. All eligible expression, mutation and copy number features compete under the same penalty, including the target's own features and the pre-specified hypotheses. Cancer lineage is included without a penalty to adjust for broad differences between cancer types.
+
+The model uses Gaussian elastic net (`alpha = 0.5`) and the more conservative one-standard-error lambda. Data preparation and feature selection are repeated within the training folds so held-out models do not influence the result. A feature is called *stable* when it is selected repeatedly, keeps the same direction, and is also nonzero in the full-data fit. More construction detail and the exact thresholds are provided in the workflow explanation above (see [4. Integrated exploratory model: what remains useful when the data are considered together?](#integrated-exploratory-model-what-remains-useful-when-the-data-are-considered-together)).
+
+<details class="model-construction-details">
+<summary><strong>Expand to read about feature preprocessing</strong></summary>
+
+<div class="model-details-box">
+
+Before entering the Gaussian elastic-net regression, predictors were processed by modality:
+
+- **Expression and copy number:** missing values were replaced with the training-set median. Each feature was then centred and standardized:
+
+  \[
+  z = \frac{x - \text{training mean}}{\text{training SD}}
+  \]
+- **Damaging mutations:** missing values were replaced with the most common training-set category, encoded as 0/1, and then centred and standardized using the training-set mutation prevalence and SD.
+- **Cancer lineage:** represented by 0/1 indicator variables relative to the most common lineage. These indicators were not standardized and were the only unpenalized predictors.
+- **Chronos dependency:** used as the continuous outcome on its original scale rather than standardized, so predictions, residuals and RMSE remain directly interpretable in Chronos units.
+
+For nested cross-validation, imputation values, means and SDs were calculated using only the corresponding outer training set and then applied unchanged to its held-out cell lines. The final full-data model calculated a new set of preprocessing values from the complete dataset.
+
+All molecular features—including target characterisation, pre-specified hypotheses and remaining genome-wide features—received the same modality-appropriate preprocessing and the same penalty factor. `glmnet` was run with `standardize = FALSE` because standardization had already been performed explicitly.
+
+</div>
+
+</details>
+
+```{r integrated-model-text, results='asis'}
+stable.predictors <- selection.stability[selection.stability$stable, ]
+if (nrow(stable.predictors)) {
   cat(sprintf(
-    "Together, these features accounted for **%.1f%%** of the observed differences in `%s` dependency. ",
-    100 * model.performance$adjusted_r_squared,
-    target
+    "The integrated procedure identified **%d stable molecular predictor%s**. These are exploratory predictors associated with `%s` dependency.\n",
+    nrow(stable.predictors), ifelse(nrow(stable.predictors) == 1L, "", "s"), target
   ))
 } else {
   cat(sprintf(
-    "After accounting for model complexity, these features did not explain more variation in `%s` dependency than an intercept-only model. ",
+    "After fitting this model, no molecular feature met all stability criteria for `%s`. This is a valid result: the full-data model was fitted with every eligible molecular feature, but none was reproducible enough to enter the reported stable set.\n",
     target
   ))
 }
-
-cat(sprintf(
-  "When tested on cell models left out during fitting, its overall prediction error was **%s Chronos units**. ",
-  format_report_number(model.performance$cv_rmse)
-))
-
-if (!is.na(model.performance$cv_r_squared) &&
-    model.performance$cv_r_squared >= 0) {
-  cat(sprintf(
-    "Its held-out predictions accounted for **%.1f%%** of the differences between those models. ",
-    100 * model.performance$cv_r_squared
-  ))
-} else {
-  cat(sprintf(
-    "It did not predict held-out models better than using the overall average `%s` dependency score (predictive R-squared = %s). ",
-    target,
-    format_report_number(model.performance$cv_r_squared)
-  ))
-}
-
-cat("The coefficients and predictions come from the ordinary linear regression. HC3 is not a different model: it is applied after fitting and changes only the standard errors, confidence intervals and P values, from which FDR is calculated. We're using this adjustment of confidence intervals because it gives extra weight to prediction errors from cell lines with unusual predictor combinations when calculating uncertainty, helping prevent a few influential models from making an association appear more precise than it is.\n")
 ```
 
-```{r model-text, results='asis'}
-molecular.coefficients <- model.coefficients[model.coefficients$term != "(Intercept)" & !grepl("^lineage_model", model.coefficients$term), ]
-if (nrow(molecular.coefficients)) {
-  supported.coefficients <- molecular.coefficients[
-    !is.na(molecular.coefficients$fdr) & molecular.coefficients$fdr < 0.05,
-  ]
-
-  if (!nrow(supported.coefficients)) {
-    cat(sprintf(
-      "None of the **%d plotted molecular features** passed the 5%% FDR threshold. ",
-      nrow(molecular.coefficients)
-    ))
-  } else if (nrow(supported.coefficients) <= 5L) {
-    supported.names <- paste0("**", supported.coefficients$label, "**")
-    if (length(supported.names) == 1L) {
-      supported.text <- supported.names
-    } else if (length(supported.names) == 2L) {
-      supported.text <- paste(supported.names, collapse = " and ")
-    } else {
-      supported.text <- paste0(
-        paste(head(supported.names, -1L), collapse = ", "),
-        ", and ",
-        tail(supported.names, 1L)
+```{r molecular-model-summary}
+modality.labels <- c(
+  expression = "Expression",
+  mutation = "Damaging mutation",
+  copy_number = "Copy number"
+)
+source.labels <- c(
+  target_characterization = "Target characterisation",
+  prespecified_hypothesis = "Pre-specified hypothesis",
+  genome_wide_candidate = "Genome-wide candidate"
+)
+molecular.model.summary <- do.call(rbind, lapply(
+  names(source.labels),
+  function(source.name) do.call(rbind, lapply(
+    names(modality.labels),
+    function(modality.name) {
+      molecular.results <- selection.stability[
+        selection.stability$role == source.name &
+          selection.stability$modality == modality.name,
+      ]
+      if (!nrow(molecular.results)) return(NULL)
+      data.frame(
+        Source = source.labels[[source.name]],
+        Modality = modality.labels[[modality.name]],
+        `Eligible predictors entered` = nrow(molecular.results),
+        `Selected in at least one outer model` = sum(
+          molecular.results$selected_count > 0
+        ),
+        `Stable predictors` = sum(molecular.results$stable),
+        check.names = FALSE
       )
     }
+  ))
+))
+knitr::kable(
+  molecular.model.summary,
+  caption = "Integrated molecular-search results by source and modality"
+)
+```
+
+### Target and pre-specified hypothesis fate
+
+Target modalities and YAML-listed hypotheses received the same regularization and stability requirements as all other molecular features. The snippet below shows their fate in the integrated model to compared directly with the integrated result.
+
+```{r hypothesis-fate-table}
+hypothesis.fate <- feature.designation[
+  feature.designation$source %in% c(
+    "target_characterization", "prespecified_hypothesis"
+  ),
+]
+hypothesis.fate$term <- paste(
+  hypothesis.fate$modality, hypothesis.fate$feature, sep = "__"
+)
+stability.index <- match(hypothesis.fate$term, selection.stability$term)
+hypothesis.fate.display <- data.frame(
+  Source = unname(source.labels[hypothesis.fate$source]),
+  Feature = hypothesis.fate$feature,
+  Modality = unname(modality.labels[hypothesis.fate$modality]),
+  `Model entry` = hypothesis.fate$model_entry,
+  `Selection frequency` = selection.stability$selection_frequency[stability.index],
+  `Direction concordance` = selection.stability$direction_concordance[stability.index],
+  `Full-fit coefficient` = selection.stability$full_discovery_coefficient[stability.index],
+  Status = ifelse(
+    hypothesis.fate$model_entry != "Entered",
+    "Ineligible",
+    ifelse(selection.stability$stable[stability.index], "Stable", "Not stable")
+  ),
+  check.names = FALSE
+)
+knitr::kable(
+  hypothesis.fate.display,
+  digits = 3,
+  caption = "Target and pre-specified-hypothesis outcomes in the integrated model"
+)
+```
+
+```{r coefficient-introduction, results='asis'}
+if (nrow(model.coefficients)) {
+  cat("The plot shows the molecular features retained consistently by the model. Negative values indicate stronger dependency; positive values indicate weaker dependency. Colours show whether a feature describes the target, a pre-specified hypothesis or another genome-wide candidate.\n")
+}
+```
+
+```{r coefficient-figure, eval=nrow(model.coefficients) > 0, out.width='90%', fig.align='center'}
+knitr::include_graphics(file.path(figure.dir, "07_integrated_model_coefficients.png"))
+```
+
+```{r stable-predictor-interpretation, results='asis'}
+if (nrow(stable.predictors)) {
+  for (predictor.index in seq_len(nrow(stable.predictors))) {
+    predictor <- stable.predictors[predictor.index, ]
+    feature.phrase <- if (predictor$modality == "mutation") {
+      paste("the presence of", predictor$label)
+    } else {
+      paste("higher", predictor$label)
+    }
+    dependency.direction <- if (predictor$full_discovery_coefficient < 0) {
+      paste("stronger", target, "dependency")
+    } else {
+      paste("weaker", target, "dependency")
+    }
     cat(sprintf(
-      "**%d of %d** plotted molecular features passed the 5%% FDR threshold: %s. ",
-      nrow(supported.coefficients),
-      nrow(molecular.coefficients),
-      supported.text
+      "**%s** was kept in **%d of %d** repeated model fits. In **%.0f%%** of those fits, %s pointed toward **%s**. In the full-data model, a one-SD increase changed the predicted Chronos score by **%s**.\n\n",
+      predictor$label,
+      predictor$selected_count,
+      predictor$models_evaluated,
+      100 * predictor$direction_concordance,
+      feature.phrase,
+      dependency.direction,
+      format_report_number(predictor$full_discovery_coefficient)
+    ))
+    if (abs(predictor$selection_frequency - 0.60) < 1e-12) {
+      cat("This is exactly the minimum selection frequency required for the stable label, so the result is borderline stable rather than highly consistent.\n\n")
+    }
+  }
+}
+```
+
+```{r coefficient-details-open, results='asis'}
+if (nrow(model.coefficients)) {
+  cat("<details>\n<summary><strong>View integrated-model coefficients</strong></summary>\n")
+}
+```
+
+```{r coefficient-table, eval=nrow(model.coefficients) > 0}
+stable.coefficient.display <- data.frame(
+  Feature = stable.predictors$label,
+  Source = unname(source.labels[stable.predictors$role]),
+  Direction = ifelse(
+    stable.predictors$full_discovery_coefficient < 0,
+    paste("Stronger", target, "dependency"),
+    paste("Weaker", target, "dependency")
+  ),
+  `Chronos change per 1 SD` = stable.predictors$full_discovery_coefficient,
+  `Selected model fits` = sprintf(
+    "%d of %d",
+    stable.predictors$selected_count,
+    stable.predictors$models_evaluated
+  ),
+  `Direction agreement` = sprintf(
+    "%.0f%%", 100 * stable.predictors$direction_concordance
+  ),
+  check.names = FALSE
+)
+knitr::kable(
+  stable.coefficient.display[
+    order(-abs(stable.predictors$full_discovery_coefficient)),
+  ],
+  digits = 3,
+  caption = "Stable molecular predictors"
+)
+```
+
+```{r coefficient-details-close, results='asis'}
+if (nrow(model.coefficients)) cat("</details>\n")
+```
+
+```{r stability-text, results='asis'}
+if (!nrow(stable.predictors)) {
+  near.misses <- selection.stability[selection.stability$near_miss, ]
+  if (nrow(near.misses)) {
+    cat("## Unstable candidates\n\nThe following features appeared in some runs but were not selected consistently. They should not be treated as retained predictors.\n")
+  } else {
+    near.misses <- selection.stability[FALSE, ]
+  }
+} else {
+  near.misses <- selection.stability[FALSE, ]
+}
+```
+
+```{r stability-table}
+stability.display <- near.misses
+if (nrow(stability.display)) {
+  stability.display <- data.frame(
+    Feature = stability.display$label,
+    Source = unname(source.labels[stability.display$role]),
+    `Selected model fits` = sprintf(
+      "%d of %d",
+      stability.display$selected_count,
+      stability.display$models_evaluated
+    ),
+    `Direction agreement` = sprintf(
+      "%.0f%%", 100 * stability.display$direction_concordance
+    ),
+    check.names = FALSE
+  )
+  knitr::kable(
+    stability.display,
+    caption = "Highest-frequency unstable genome-wide candidates"
+  )
+}
+```
+
+---
+
+# Performance on held-out cell lines
+
+The model was tested on cell lines that were not used to train it. This estimates how well its predictions may generalise to new data.
+
+```{r model-performance-text, results='asis'}
+rmse.mean <- mean(model.performance$rmse)
+rmse.sd <- sd(model.performance$rmse)
+pearson.mean <- mean(model.performance$pearson_r)
+pearson.sd <- sd(model.performance$pearson_r)
+r2.mean <- mean(model.performance$r_squared)
+r2.sd <- sd(model.performance$r_squared)
+dependency.sd <- dependency$sd[1]
+rmse.relative <- rmse.mean / dependency.sd
+pearson.range <- range(model.performance$pearson_r)
+r2.range <- range(model.performance$r_squared)
+rmse.range <- range(model.performance$rmse)
+pearson.consistency <- if (diff(pearson.range) <= 0.05) {
+  "similar across repeats"
+} else {
+  "varied across repeats"
+}
+r2.consistency <- if (diff(r2.range) <= 0.05) {
+  "similar across repeats"
+} else {
+  "varied across repeats"
+}
+rmse.consistency <- if (diff(rmse.range) <= 0.05 * dependency.sd) {
+  "similar across repeats"
+} else {
+  "varied across repeats"
+}
+
+cat(sprintf(
+  "**Pearson r** compares the pattern of predicted and observed values. It asks whether cell lines predicted to have high dependency scores actually have high observed scores, and whether those predicted to have low scores actually have low observed scores. The mean held-out Pearson r was **%s** (range %s to %s), showing how closely the model ranked observed dependency scores. The Pearson r results were **%s**.\n\n",
+  format_report_number(pearson.mean),
+  format_report_number(pearson.range[1]),
+  format_report_number(pearson.range[2]),
+  pearson.consistency
+))
+
+r2.result.description <- if (r2.mean < 0) {
+  sprintf(
+    "On average, the model performed worse than assigning every cell line the average observed `%s` dependency score.",
+    target
+  )
+} else if (r2.mean == 0) {
+  sprintf(
+    "On average, the model performed the same as assigning every cell line the average observed `%s` dependency score.",
+    target
+  )
+} else {
+  sprintf(
+    "On average, the model reduced the total squared prediction error by approximately **%.1f%%** relative to assigning every cell line the average observed `%s` dependency score.",
+    100 * r2.mean, target
+  )
+}
+cat(sprintf(
+  "**R-squared** measures numerical prediction accuracy by comparing the model's total squared prediction errors with those from assigning every cell line the average observed dependency score. An R-squared of 1 represents perfect predictions, 0 means the model is no better than that average-only reference, and a negative value means it is worse. The mean held-out R-squared was **%s** (range %s to %s). %s The R-squared results were **%s**.\n\n",
+  format_report_number(r2.mean),
+  format_report_number(r2.range[1]),
+  format_report_number(r2.range[2]),
+  r2.result.description,
+  r2.consistency
+))
+
+cat(sprintf(
+  "**RMSE** summarises the typical size of the difference between predicted and observed dependency scores, with larger errors receiving more weight. The mean held-out RMSE was **%s Chronos units** (range %s to %s), equivalent to **%.1f%%** of the observed `%s` dependency SD of %s. Lower values indicate predictions closer to the observed scores, and 0 represents perfect predictions. The RMSE results were **%s**.\n\n",
+  format_report_number(rmse.mean),
+  format_report_number(rmse.range[1]),
+  format_report_number(rmse.range[2]),
+  100 * rmse.relative,
+  target,
+  format_report_number(dependency.sd),
+  rmse.consistency
+))
+
+performance.description <- if (r2.mean <= 0) {
+  "no useful"
+} else if (r2.mean < 0.10) {
+  "limited"
+} else if (r2.mean < 0.30) {
+  "modest"
+} else if (r2.mean < 0.50) {
+  "moderate"
+} else {
+  "strong"
+}
+cat(sprintf(
+  "Based on R-squared, the model therefore had **%s held-out predictive performance**.\n\n",
+  performance.description
+))
+cat("This performance describes the complete model, including cancer lineage and all molecular features selected within each training fold. It cannot be attributed to any single retained gene.\n")
+```
+
+For exploratory feature prioritisation, a positive and consistent held-out R-squared indicates useful signal. Accurate prediction of individual cell lines would require substantially smaller errors and independent validation.
+
+## Observed versus predicted dependency
+
+The three panels show the three complete cross-validation repeats. Every point is a cell line predicted while it was held out from model fitting and feature selection. The dashed diagonal marks a perfect prediction, where the predicted score equals the observed score. The vertical distance between a point and this line is the prediction error for that cell line: larger distances increase RMSE and reduce R-squared.
+
+```{r observed-predicted-figure, out.width='100%', fig.align='center'}
+knitr::include_graphics(file.path(figure.dir, "08_observed_vs_predicted.png"))
+```
+
+## Performance by lineage
+
+This comparison asks whether the model predicts differences among cell lines *within* each cancer lineage. A lineage R-squared above zero means the model improves on assigning every cell line that lineage's average dependency score; a negative value means it performs worse than that simple reference. Only lineages with at least 20 models are shown. Lineage estimates are less precise than the pan-cancer result and should be treated as diagnostic rather than as separate validated models.
+
+```{r lineage-performance-text, results='asis'}
+positive.lineage.count <- sum(lineage.performance$r_squared_mean > 0)
+modest.lineage.count <- sum(lineage.performance$r_squared_mean >= 0.10)
+best.lineage <- lineage.performance[
+  which.max(lineage.performance$r_squared_mean),
+]
+worst.lineage <- lineage.performance[
+  which.min(lineage.performance$r_squared_mean),
+]
+cat(sprintf(
+  "The model had positive held-out R-squared in **%d of %d lineages**, and **%d lineages reached R-squared 0.10**. The highest value was observed in **%s** (R-squared %s; RMSE %s), while the lowest was observed in **%s** (R-squared %s; RMSE %s).",
+  positive.lineage.count,
+  nrow(lineage.performance),
+  modest.lineage.count,
+  best.lineage$lineage,
+  format_report_number(best.lineage$r_squared_mean),
+  format_report_number(best.lineage$rmse_mean),
+  worst.lineage$lineage,
+  format_report_number(worst.lineage$r_squared_mean),
+  format_report_number(worst.lineage$rmse_mean)
+))
+if (modest.lineage.count == 0L) {
+  if (r2.mean > 0) {
+    cat(sprintf(
+      "\n\nFor `%s`, the positive pan-cancer R-squared therefore should not be interpreted as evidence that the model can reliably rank cell lines within individual cancer types. The pattern suggests that much of the overall predictive performance comes from differences between lineages.",
+      target
     ))
   } else {
     cat(sprintf(
-      "**%d of %d** plotted molecular features passed the 5%% FDR threshold. ",
-      nrow(supported.coefficients),
-      nrow(molecular.coefficients)
+      "\n\nFor `%s`, this is consistent with the lack of useful predictive performance in the pan-cancer analysis: the model did not reliably rank cell lines either overall or within individual cancer types.",
+      target
     ))
   }
-
-  strongest.coefficient <- molecular.coefficients[which.min(molecular.coefficients$p_value), ]
-  dependency.direction <- if (strongest.coefficient$estimate < 0) "stronger" else "weaker"
-  cat(sprintf("The strongest adjusted molecular association was **%s** (coefficient %s; 95%% CI %s to %s), corresponding to %s dependency as the feature increases or is present.\n",
-              strongest.coefficient$label, format_report_number(strongest.coefficient$estimate), format_report_number(strongest.coefficient$conf_low), format_report_number(strongest.coefficient$conf_high), dependency.direction))
 }
 ```
 
-Expand the section below to inspect the exact numbers behind the plot, ordered from lowest to highest FDR. Note also the estimate, whether it is positive or negative, to understand the adjusted change (effect, direction) on the dependency. The full table also includes the intercept and lineage adjustment terms omitted from the figure.
+```{r lineage-performance-figure, out.width='90%', fig.align='center'}
+knitr::include_graphics(file.path(figure.dir, "09_lineage_cv_performance.png"))
+```
 
 <details>
-<summary><strong>View full linear-regression results</strong></summary>
+<summary><strong>View lineage-performance values</strong></summary>
 
-```{r coefficient-table}
-model.coefficients.ordered <- model.coefficients[
-  order(
-    is.na(model.coefficients$fdr),
-    model.coefficients$fdr,
-    model.coefficients$p_value
-  ),
-]
+```{r lineage-performance-table}
+lineage.performance.display <- data.frame(
+  Lineage = lineage.performance$lineage,
+  N = lineage.performance$n,
+  MAE = lineage.performance$mae_mean,
+  RMSE = lineage.performance$rmse_mean,
+  `R-squared` = lineage.performance$r_squared_mean,
+  `R-squared SD` = lineage.performance$r_squared_sd,
+  check.names = FALSE
+)
 knitr::kable(
-  model.coefficients.ordered,
+  lineage.performance.display,
   digits = 3,
-  caption = "Full linear-regression results, ordered by FDR"
+  caption = "Held-out performance by lineage, averaged across three repeats"
+)
+```
+
+</details>
+
+<details>
+<summary><strong>View cross-validation details</strong></summary>
+
+```{r model-performance-table}
+model.performance.display <- data.frame(
+  Repeat = model.performance$repeat_id,
+  N = model.performance$n,
+  `Outer folds` = model.performance$outer_folds,
+  `Inner folds` = model.performance$inner_folds,
+  Alpha = model.performance$alpha,
+  `Lambda rule` = model.performance$lambda_rule,
+  RMSE = model.performance$rmse,
+  `Pearson r` = model.performance$pearson_r,
+  `R-squared` = model.performance$r_squared,
+  check.names = FALSE
+)
+knitr::kable(
+  model.performance.display,
+  digits = 3,
+  caption = "Nested-cross-validation performance by repeat"
 )
 ```
 
@@ -513,9 +1210,9 @@ knitr::kable(
 
 # Conclusion, interpretation and limitations
 
-This report asked which molecular features predict dependency on **`r target`** across cancer cell models. It first described the dependency distribution and cancer-lineage pattern, then screened target expression, target copy number, damaging mutations and genome-wide copy number individually. The final ordinary linear regression brought the candidate features together with lineage to ask which features still contributed information after their potential confounding was considered.
+This report asked which molecular features are associated with dependency on **`r target`** and whether exploratory molecular predictors recur when all eligible modalities are considered jointly. It first described dependency and lineage patterns, retained the pan-cancer univariate screens as descriptive analyses, and followed eligible target/pre-specified-hypothesis associations within individual lineages. The integrated model then allowed every eligible molecular feature to compete under the same elastic-net penalty while keeping lineage as an unpenalized adjustment.
 
-The ordinary linear regression estimates an adjusted association for each feature while holding the others constant. Continuous measurements were placed on a common scale, so their coefficients describe a one-standard-deviation increase. HC3 is then applied only to the uncertainty calculation; it does not refit the regression or change its coefficients and predictions. HC3 gives extra weight to prediction errors from cell lines with unusual predictor combinations when calculating standard errors, helping prevent a small number of influential models from making an association appear too precise.
+The resulting stable genes, when present, are exploratory molecular predictors rather than causal genes or independently significant effects. Their evidence is summarized by repeated outer-fold selection frequency, coefficient-direction concordance, persistence in the full-data fit and nested-CV performance.
 
 Specifically:
 
@@ -552,76 +1249,26 @@ if (!is.na(lineage.global$p_value) && lineage.global$p_value < 0.05) {
   cat("There was no clear evidence that dependency varied across cancer lineages. ")
 }
 
-adjusted.findings <- model.coefficients[
-  model.coefficients$term != "(Intercept)" &
-    !grepl("^lineage_model", model.coefficients$term) &
-    !is.na(model.coefficients$fdr) &
-    model.coefficients$fdr < 0.05,
-]
-adjusted.findings <- adjusted.findings[order(adjusted.findings$fdr), ]
-
-if (nrow(adjusted.findings)) {
-  finding.text <- character()
-  for (finding.index in seq_len(nrow(adjusted.findings))) {
-    finding <- adjusted.findings[finding.index, ]
-    finding.direction <- if (finding$estimate < 0) "stronger" else "weaker"
-
-    if (finding$term == "z_target_expression") {
-      finding.subject <- sprintf("higher **%s expression**", target)
-      finding.effect <- sprintf(
-        "%s Chronos units per 1 SD increase",
-        format_report_number(finding$estimate)
-      )
-    } else if (finding$term == "z_target_copy_number") {
-      finding.subject <- sprintf("higher **%s copy number**", target)
-      finding.effect <- sprintf(
-        "%s Chronos units per 1 SD increase",
-        format_report_number(finding$estimate)
-      )
-    } else if (grepl("^z_copy_number__", finding$term)) {
-      finding.gene <- sub("^z_copy_number__", "", finding$term)
-      finding.subject <- sprintf("higher **%s copy number**", finding.gene)
-      finding.effect <- sprintf(
-        "%s Chronos units per 1 SD increase",
-        format_report_number(finding$estimate)
-      )
-    } else {
-      finding.gene <- sub("^mutation__", "", finding$term)
-      finding.subject <- sprintf(
-        "models carrying a damaging **%s mutation**",
-        finding.gene
-      )
-      finding.effect <- sprintf(
-        "%s Chronos units versus reference models",
-        format_report_number(finding$estimate)
-      )
-    }
-
-    finding.text <- c(finding.text, sprintf(
-      "%s was associated with **%s %s dependency** (%s; FDR %s)",
-      finding.subject,
-      finding.direction,
-      target,
-      finding.effect,
-      format_report_p_value(finding$fdr)
-    ))
-  }
-  cat(paste0(
-    "\n\nAfter adjustment and FDR correction, ",
-    paste(finding.text, collapse = "; "),
-    ".\n"
+if (nrow(stable.predictors)) {
+  stable.names <- paste0(
+    "**", stable.predictors$gene, " ",
+    gsub("_", " ", stable.predictors$modality), "**"
+  )
+  cat(sprintf(
+    "\n\nThe stable molecular predictor set contained %s. These findings require independent biological validation.\n",
+    paste(stable.names, collapse = ", ")
   ))
 } else {
   cat(sprintf(
-    "\n\nAfter adjustment and FDR correction, no tested molecular feature clearly provided additional information about `%s` dependency.\n",
+    "\n\nNo molecular feature satisfied the stability criteria for `%s`; no predictor was added merely to make the reported stable set non-empty.\n",
     target
   ))
 }
 ```
 
-These results provide a prioritisation map. For example, FDR-supported features could be tested as candidate biomarkers in independent, lineage-balanced models, while lineage findings can guide the cancer contexts included in validation experiments. Copy-number findings should also be tested to determine whether they represent the named gene or a broader chromosomal event. A useful next experiment is to ask whether the nominated feature reproducibly separates models with stronger and weaker `r target` dependency and whether the relationship persists with an independent genetic or pharmacological perturbation.
+These results provide a prioritisation map for validation in independent, lineage-balanced models. Copy number predictors should also be tested to determine whether they represent the named gene or a broader chromosomal event. A useful next experiment is to ask whether a stable or near-miss predictor reproducibly separates models with stronger and weaker `r target` dependency under an independent genetic or pharmacological perturbation.
 
-The inverse question: *which dependencies are selective in models carrying mutation of a chosen tumour suppressor?* requires a different feature-centric genome-wide dependency screen and remains outside this repository's current scope. However, a good starting point is [Nature Genetics 2023;55:1159–1170](https://www.nature.com/articles/s41588-025-02108-2), and its associated [SYLVER app](https://software.icr.ac.uk/app/sylver/) for exploring selective dependencies in the context of specific mutations.
+The inverse question: *which dependencies are selective in models carrying mutation of a chosen tumour suppressor?* requires a different feature-centric genome-wide dependency screen and remains outside this repository's current scope. However, a good starting point is [Haider *et al.*, Nature Genetics 57, 522–529 (2025)](https://www.nature.com/articles/s41588-025-02108-2), and its associated [SYLVER app](https://software.icr.ac.uk/app/sylver/) for exploring selective dependencies in the context of specific mutations.
 Stay in touch with the repository for future developments.
 
 # Reproducibility

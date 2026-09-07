@@ -8,6 +8,8 @@
 data/raw/
 data/processed/
 results/*/intermediate/
+results/*/tables/16_nested_cv_predictions.csv
+tests/
 
 *.csv.gz
 *.tsv.gz

@@ -20,9 +20,10 @@ plot.colours <- c(
 # Load the prepared data and results used by the six figures.
 analysis.data <- readRDS(file.path(intermediate.dir, "analysis_data.rds"))
 lineage.data <- readRDS(file.path(intermediate.dir, "lineage_data.rds"))
+expression.results <- readRDS(file.path(intermediate.dir, "expression_associations.rds"))
 mutation.results <- readRDS(file.path(intermediate.dir, "mutation_associations.rds"))
 copy.number.results <- readRDS(file.path(intermediate.dir, "copy_number_associations.rds"))
-model.result <- readRDS(file.path(intermediate.dir, "multivariable_model.rds"))
+model.result <- readRDS(file.path(intermediate.dir, "integrated_model.rds"))
 
 ## MAIN ########################################################################
 # Plot the pan-cancer dependency distribution.
@@ -142,7 +143,7 @@ ggsave(
   bg = plot.colours[["background"]]
 )
 
-# Show the target expression-dependency relationship and fitted linear trend.
+# Show the target expression-dependency relationship and its linear trend.
 expression.plot.data <- analysis.data[
   complete.cases(analysis.data[, c("target_expression", "dependency")]),
 ]
@@ -163,6 +164,7 @@ expression.plot <- ggplot(
   ) +
   labs(
     title = paste(target, "expression and dependency"),
+    subtitle = "Line and band show the unadjusted linear fit and 95% confidence interval",
     x = paste0(target, " expression (log2 TPM + 1)"),
     y = "Chronos score"
   ) +
@@ -176,9 +178,62 @@ ggsave(
   bg = plot.colours[["background"]]
 )
 
+# Display the leading genome-wide expression correlations.
+genome.expression.plot.data <- head(
+  expression.results[
+    expression.results$eligible,
+  ],
+  12L
+)
+genome.expression.plot.data$gene <- factor(
+  genome.expression.plot.data$gene,
+  levels = rev(genome.expression.plot.data$gene)
+)
+genome.expression.plot.data$notable <-
+  !is.na(genome.expression.plot.data$fdr) &
+  genome.expression.plot.data$fdr < 0.05 &
+  abs(genome.expression.plot.data$spearman_rho) >= 0.30
+genome.expression.plot <- ggplot(
+  genome.expression.plot.data,
+  aes(spearman_rho, gene)
+) +
+  geom_vline(
+    xintercept = 0,
+    color = plot.colours[["reference"]],
+    linetype = "dashed"
+  ) +
+  geom_segment(
+    aes(x = 0, xend = spearman_rho, yend = gene, color = notable)
+  ) +
+  geom_point(aes(color = notable), size = 2.4) +
+  scale_color_manual(
+    values = c(
+      `TRUE` = plot.colours[["accent"]],
+      `FALSE` = plot.colours[["neutral"]]
+    ),
+    guide = "none"
+  ) +
+  labs(
+    title = "Top genome-wide expression associations",
+    subtitle = "Pink points pass 5% FDR and |Spearman rho| ≥ 0.30",
+    x = paste("Spearman correlation with", target, "Chronos dependency"),
+    y = NULL
+  ) +
+  dependency_plot_theme()
+ggsave(
+  file.path(figure.dir, "04_expression_associations.png"),
+  genome.expression.plot,
+  width = 7,
+  height = 5,
+  dpi = 300,
+  bg = plot.colours[["background"]]
+)
+
 # Display the leading damaging-mutation effects and confidence intervals.
 mutation.plot.data <- head(
-  mutation.results[mutation.results$eligible, ],
+  mutation.results[
+    mutation.results$eligible,
+  ],
   12L
 )
 mutation.plot.data$gene <- factor(
@@ -191,9 +246,10 @@ mutation.plot <- ggplot(mutation.plot.data, aes(effect, gene)) +
     color = plot.colours[["reference"]],
     linetype = "dashed"
   ) +
-  geom_errorbarh(
+  geom_errorbar(
     aes(xmin = conf_low, xmax = conf_high),
-    height = 0.2,
+    orientation = "y",
+    width = 0.2,
     color = plot.colours[["primary"]]
   ) +
   geom_point(aes(color = fdr < 0.05), size = 2.3) +
@@ -206,13 +262,15 @@ mutation.plot <- ggplot(mutation.plot.data, aes(effect, gene)) +
   ) +
   labs(
     title = "Top damaging-mutation associations",
-    subtitle = "Negative effects indicate stronger dependency in altered models",
-    x = "Mean Chronos difference: altered minus reference",
+    subtitle = "Points show mean differences and bars show Welch 95% confidence intervals",
+    x = paste(
+      "Mean", target, "Chronos difference: altered minus wild type"
+    ),
     y = NULL
   ) +
   dependency_plot_theme()
 ggsave(
-  file.path(figure.dir, "04_mutation_associations.png"),
+  file.path(figure.dir, "05_mutation_associations.png"),
   mutation.plot,
   width = 7,
   height = 5,
@@ -222,19 +280,19 @@ ggsave(
 
 # Display the leading genome-wide copy-number correlations.
 copy.number.plot.data <- head(
-  copy.number.results[copy.number.results$eligible, ],
+  copy.number.results[
+    copy.number.results$eligible,
+  ],
   12L
 )
 copy.number.plot.data$gene <- factor(
   copy.number.plot.data$gene,
   levels = rev(copy.number.plot.data$gene)
 )
-copy.number.significant <- copy.number.plot.data[
-  !is.na(copy.number.plot.data$fdr) & copy.number.plot.data$fdr < 0.05,
-]
-copy.number.not.significant <- copy.number.plot.data[
-  is.na(copy.number.plot.data$fdr) | copy.number.plot.data$fdr >= 0.05,
-]
+copy.number.plot.data$notable <-
+  !is.na(copy.number.plot.data$fdr) &
+  copy.number.plot.data$fdr < 0.05 &
+  abs(copy.number.plot.data$correlation) >= 0.30
 copy.number.plot <- ggplot(copy.number.plot.data, aes(correlation, gene)) +
   geom_vline(
     xintercept = 0,
@@ -242,34 +300,25 @@ copy.number.plot <- ggplot(copy.number.plot.data, aes(correlation, gene)) +
     linetype = "dashed"
   ) +
   geom_segment(
-    data = copy.number.significant,
-    aes(x = 0, xend = correlation, yend = gene),
-    color = plot.colours[["secondary"]]
+    aes(x = 0, xend = correlation, yend = gene, color = notable)
   ) +
-  geom_segment(
-    data = copy.number.not.significant,
-    aes(x = 0, xend = correlation, yend = gene),
-    color = plot.colours[["neutral"]]
-  ) +
-  geom_point(
-    data = copy.number.significant,
-    color = plot.colours[["accent"]],
-    size = 2.4
-  ) +
-  geom_point(
-    data = copy.number.not.significant,
-    color = plot.colours[["neutral"]],
-    size = 2.4
+  geom_point(aes(color = notable), size = 2.4) +
+  scale_color_manual(
+    values = c(
+      `TRUE` = plot.colours[["accent"]],
+      `FALSE` = plot.colours[["neutral"]]
+    ),
+    guide = "none"
   ) +
   labs(
-    title = "Top copy-number associations",
-    subtitle = "Pearson correlations used for the genome-wide screen",
-    x = "Correlation with Chronos dependency",
+    title = "Top copy number associations",
+    subtitle = "Pink points pass 5% FDR and |Pearson r| ≥ 0.30",
+    x = paste("Pearson correlation with", target, "Chronos dependency"),
     y = NULL
   ) +
   dependency_plot_theme()
 ggsave(
-  file.path(figure.dir, "05_copy_number_associations.png"),
+  file.path(figure.dir, "06_copy_number_associations.png"),
   copy.number.plot,
   width = 7,
   height = 5,
@@ -277,72 +326,173 @@ ggsave(
   bg = plot.colours[["background"]]
 )
 
-# Show adjusted molecular coefficients without the intercept or lineage contrasts.
-coefficient.plot.data <- model.result$coefficients[
-  model.result$coefficients$term != "(Intercept)" &
-    !grepl("^lineage_model", model.result$coefficients$term),
-  , drop = FALSE
-]
-coefficient.plot.data <- coefficient.plot.data[
-  order(
-    is.na(coefficient.plot.data$fdr),
-    coefficient.plot.data$fdr,
-    coefficient.plot.data$p_value
+# Show only stable molecular predictors from the single full-data fit. Their
+# biological source changes the visual annotation, not their model penalty.
+coefficient.plot.data <- model.result$coefficients
+if (nrow(coefficient.plot.data)) {
+  coefficient.plot.data <- coefficient.plot.data[
+    order(abs(coefficient.plot.data$coefficient), decreasing = TRUE),
+  ]
+  coefficient.plot.data$plot.label <- factor(
+    coefficient.plot.data$label,
+    levels = rev(coefficient.plot.data$label)
+  )
+  coefficient.plot.data$predictor.source <- unname(c(
+    target_characterization = "Target characterisation",
+    prespecified_hypothesis = "Pre-specified hypothesis",
+    genome_wide_candidate = "Genome-wide candidate"
+  )[coefficient.plot.data$role])
+  coefficient.plot <- ggplot(
+    coefficient.plot.data,
+    aes(
+      coefficient, plot.label,
+      colour = predictor.source, shape = predictor.source
+    )
+  ) +
+    geom_vline(
+      xintercept = 0,
+      color = plot.colours[["reference"]],
+      linetype = "dashed"
+    ) +
+    geom_segment(
+      aes(x = 0, xend = coefficient, yend = plot.label),
+      linewidth = 0.45
+    ) +
+    geom_point(size = 2.7) +
+    scale_colour_manual(values = c(
+      "Target characterisation" = plot.colours[["primary"]],
+      "Pre-specified hypothesis" = plot.colours[["accent"]],
+      "Genome-wide candidate" = plot.colours[["secondary"]]
+    )) +
+    labs(
+      title = paste("Stable integrated predictors of", target, "dependency"),
+      subtitle = "Standardized elastic-net coefficients; biological source does not alter penalization",
+      x = paste0(
+        "Elastic-net coefficient for ", target, " Chronos score\n",
+        "← Stronger dependency                 Weaker dependency →"
+      ),
+      y = NULL,
+      colour = NULL,
+      shape = NULL
+    ) +
+    dependency_plot_theme()
+  ggsave(
+    file.path(figure.dir, "07_integrated_model_coefficients.png"),
+    coefficient.plot,
+    width = 7,
+    height = max(5, nrow(coefficient.plot.data) * 0.38 + 1.5),
+    dpi = 300,
+    bg = plot.colours[["background"]]
+  )
+} else {
+  unlink(file.path(figure.dir, "07_integrated_model_coefficients.png"))
+}
+unlink(file.path(figure.dir, "07_multivariable_coefficients.png"))
+
+# Display every held-out prediction without averaging across repeats. Faceting
+# makes the repeat-to-repeat consistency visible while the diagonal shows
+# perfect calibration.
+prediction.plot.data <- model.result$predictions
+repeat.pearson.r <- vapply(
+  split(prediction.plot.data, prediction.plot.data$repeat_id),
+  function(repeat.data) cor(
+    repeat.data$observed, repeat.data$predicted,
+    use = "complete.obs", method = "pearson"
   ),
-]
-coefficient.plot.data$plot.label <- sub(
-  " \\(for a 1 SD increase\\)$",
-  "\n(1 SD higher)",
-  coefficient.plot.data$label
+  numeric(1)
 )
-coefficient.plot.data$plot.label <- factor(
-  coefficient.plot.data$plot.label,
-  levels = rev(coefficient.plot.data$plot.label)
+repeat.labels <- sprintf(
+  "Repeat %s\nHeld-out Pearson r = %.3f",
+  names(repeat.pearson.r), repeat.pearson.r
 )
-coefficient.plot.significant <- coefficient.plot.data[
-  !is.na(coefficient.plot.data$fdr) & coefficient.plot.data$fdr < 0.05,
-]
-coefficient.plot.not.significant <- coefficient.plot.data[
-  is.na(coefficient.plot.data$fdr) | coefficient.plot.data$fdr >= 0.05,
-]
-coefficient.plot <- ggplot(coefficient.plot.data, aes(estimate, plot.label)) +
-  geom_vline(
-    xintercept = 0,
-    color = plot.colours[["reference"]],
-    linetype = "dashed"
-  ) +
-  geom_errorbarh(
-    aes(xmin = conf_low, xmax = conf_high),
-    height = 0.2,
-    color = plot.colours[["primary"]]
+names(repeat.labels) <- names(repeat.pearson.r)
+prediction.plot.data$repeat_label <- factor(
+  repeat.labels[as.character(prediction.plot.data$repeat_id)],
+  levels = repeat.labels
+)
+prediction.range <- range(
+  c(prediction.plot.data$observed, prediction.plot.data$predicted),
+  finite = TRUE
+)
+prediction.plot <- ggplot(
+  prediction.plot.data,
+  aes(observed, predicted)
+) +
+  geom_abline(
+    slope = 1, intercept = 0,
+    colour = plot.colours[["reference"]], linetype = "dashed"
   ) +
   geom_point(
-    data = coefficient.plot.significant,
-    size = 2.5,
-    color = plot.colours[["accent"]]
+    colour = plot.colours[["primary"]], alpha = 0.35, size = 0.9
   ) +
-  geom_point(
-    data = coefficient.plot.not.significant,
-    size = 2.5,
-    color = plot.colours[["neutral"]]
-  ) +
+  facet_wrap(~ repeat_label, nrow = 1L) +
+  coord_equal(xlim = prediction.range, ylim = prediction.range) +
   labs(
-    title = paste("What predicts", target, "dependency after adjustment?"),
-    subtitle = "Ordered by FDR; pink points pass the 5% FDR threshold",
-    x = paste0(
-      "Adjusted change in ", target, " Chronos score\n",
-      "← Stronger dependency                 Weaker dependency →"
-    ),
-    y = NULL
+    title = paste("Held-out predictions of", target, "dependency"),
+    subtitle = "Each point is one cell line. The dashed diagonal represents a perfect prediction",
+    x = "Observed Chronos score",
+    y = "Predicted Chronos score"
   ) +
   dependency_plot_theme()
 ggsave(
-  file.path(figure.dir, "06_multivariable_coefficients.png"),
-  coefficient.plot,
-  width = 7,
-  height = 5,
+  file.path(figure.dir, "08_observed_vs_predicted.png"),
+  prediction.plot,
+  width = 9,
+  height = 3.8,
   dpi = 300,
   bg = plot.colours[["background"]]
 )
 
-message("Wrote six standardized figures.")
+# Compare within-lineage predictive performance. Error bars describe variation
+# across the three outer-CV repeats, not coefficient uncertainty.
+lineage.performance.plot.data <- model.result$lineage_performance
+lineage.performance.plot.data$lineage <- factor(
+  lineage.performance.plot.data$lineage,
+  levels = rev(lineage.performance.plot.data$lineage)
+)
+lineage.performance.plot <- ggplot(
+  lineage.performance.plot.data,
+  aes(r_squared_mean, lineage)
+) +
+  geom_vline(
+    xintercept = 0,
+    colour = plot.colours[["reference"]], linetype = "dashed"
+  ) +
+  geom_errorbar(
+    aes(
+      xmin = r_squared_mean - r_squared_sd,
+      xmax = r_squared_mean + r_squared_sd
+    ),
+    orientation = "y",
+    width = 0.2,
+    colour = plot.colours[["secondary"]]
+  ) +
+  geom_point(
+    aes(size = n, colour = r_squared_mean > 0),
+    alpha = 0.9
+  ) +
+  scale_colour_manual(
+    values = c(
+      "TRUE" = plot.colours[["primary"]],
+      "FALSE" = plot.colours[["neutral"]]
+    ),
+    guide = "none"
+  ) +
+  scale_size_continuous(name = "Cell lines", range = c(2, 5)) +
+  labs(
+    title = paste("Held-out predictive performance by cancer lineage"),
+    subtitle = "Within-lineage R² averaged across three repeats; bars show ±1 SD",
+    x = "Held-out R² (0 = no improvement over the lineage mean)",
+    y = NULL
+  ) +
+  dependency_plot_theme()
+ggsave(
+  file.path(figure.dir, "09_lineage_cv_performance.png"),
+  lineage.performance.plot,
+  width = 8,
+  height = max(5, nrow(lineage.performance.plot.data) * 0.28 + 1.8),
+  dpi = 300,
+  bg = plot.colours[["background"]]
+)
+
+message("Wrote standardized figures.")

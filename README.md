@@ -1,19 +1,10 @@
 # Cancer Dependency Explorer
 
-**Which molecular features predict dependency on a selected cancer target?**
+**Which molecular features are associated with dependency on a selected cancer target, and which exploratory molecular predictors are reproducible when the data are considered jointly?**
 
-Cancer Dependency Explorer is a reproducible R workflow for investigating why cancer cell lines differ in their dependency on a selected target gene. The selected gene’s CRISPR dependency score is treated as the outcome. The pipeline tests whether differences in dependency are associated with cancer lineage, expression and copy number of the target, damaging mutations elsewhere in the genome, and genome-wide copy-number features.
-The workflow produces data-quality summaries, univariate association screens, an interpretable multivariable linear regression with HC3-adjusted uncertainty, standardised figures and a self-contained HTML report.
+Cancer Dependency Explorer is a reproducible R workflow that integrates DepMap CRISPR dependency with cancer lineage, expression, damaging mutations and copy number. The integrated modelling uses elastic net so conditional or suppressor relationships can emerge without needing to pass a marginal association threshold first.
 
-#### Worked example: MDM2
-
-The included example treats the MDM2 CRISPR dependency score as the outcome and asks:
-
-> Why are some cancer cell lines more dependent on MDM2 than others?
-
-To address this question, the pipeline tests whether stronger or weaker MDM2 dependency is associated with cancer lineage, MDM2 expression, MDM2 copy number, or damaging mutations in other genes.
-Using DepMap Public 26Q1, the worked example identifies TP53 mutation status as a major molecular feature associated with MDM2 dependency. It also demonstrates how prior biological hypotheses and genome-wide discoveries can be evaluated alongside target expression, copy number and lineage, while reducing redundancy among highly correlated predictors.
-These associations are intended to generate hypotheses. They do not demonstrate causality or establish that the selected target is therapeutically actionable.
+The workflow produces data quality summaries, target self-associations, analyses on pre-specified hypothesis, lineage adjusted tests, whole genome analysese, results on an integrated model with performance evaluated with cross validation, and a self-contained HTML report.
 
 ## Run a target assessment
 
@@ -24,127 +15,139 @@ conda env create -f environment.yml
 conda activate cancer-dependency-explorer
 ```
 
-Download the files listed in [data/README.md](data/README.md). These are the raw files from the portal, and they need processing. Save these files in data/raw/ before continuing with the pipeline.
-This workflow has chained the numbered scripts into one workflow given the genes of interest (``--target MDM2`` or any target of interest), run:
+Download the files listed in [data/README.md](data/README.md) and place them in `data/raw/`, then run:
 
 ```bash
 Rscript run_analysis.R \
-  --target MDM2 \
-  --raw-dir /path/to/depmap/26Q1
+  --target SOX10 \
+  --release "DepMap Public 26Q1" \
+  --raw-dir data/raw \
+  --biomarkers config/SOX10_biomarkers.yml
 ```
 
-`DEPMAP_RAW_DIR` can replace `--raw-dir`. 
+`DEPMAP_RAW_DIR` and `DEPMAP_RELEASE` can replace `--raw-dir` and `--release`.
 
-An optional YAML file can pre-specify biologically motivated biomarkers for inclusion in the model before data-driven candidates are selected:
+The YAML file is optional (see below **Pre-specified hypotheses**). When `--biomarkers` is omitted, the workflow automatically uses `config/<TARGET>_biomarkers.yml` if it exists. A supplied file must follow that filename convention, and its `target` value must match `--target`.
 
-```bash
-Rscript run_analysis.R \
-  --target MDM2 \
-  --raw-dir /path/to/depmap/26Q1 \
-  --biomarkers config/MDM2_biomarkers.yml
-```
+## Pre-specified hypotheses
 
-The configuration format is:
+A pre-specified hypothesis is a molecular feature nominated before modelling from biological knowledge in the YAML configuration. The designation does not assert an association or assign the feature preferential model weight. The files look like this:
 
 ```yaml
-target: MDM2
+target: SOX10
+expression:
+  - MITF
 mutation:
-  - TP53
-copy_number: []
-```
-
-or
-
-```yaml
-target: MDM2
-mutation:
-  - TP53
+  - NF1
 copy_number:
-  - gene1
-  - gene2
+  - MITF
 ```
 
-The ``target: value`` inside the file must match ``--target``; this prevents accidentally applying hypotheses intended for another target. No configuration is required. Any target-only run works when the gene is present in the dependency, expression and copy-number matrices.
+Every YAML feature is first evaluated pan-cancer in the same modality wide univariate screen as every other gene. In the integrated model, an eligible YAML feature receives the same penalty and stability requirements as every other molecular feature. Eligibility still applies:
 
-The pipeline validates the pre-specified biomarkers, performs the genome-wide screens, and excludes automatic candidates that are highly correlated with target features, configured biomarkers or previously selected candidates. (Without a YAML file the tool remains fully functional can select up to two significant, nonredundant mutation and two copy-number biomarkers automatically).
+- Expression and copy number require at least 80% coverage among models with any data from the corresponding assay, plus nonzero variance. Models without that assay are retained for integrated modelling and receive training fold median imputation; the report shows overall assay coverage separately.
+- Damaging mutations require at least 10 altered and 10 wild type models.
 
-## What the workflow does
+Eligible damaging-mutation associations are tested with R's built-in unequal-variance Welch t-test. The reported mean difference, 95% confidence interval and P value come from the same test, followed by modality-wide FDR correction.
 
-1. Validates gene availability, default omics entries, model identifiers, coverage, missingness and variance.
-2. Describes the target dependency distribution and lineage specificity.
-3. Tests target expression and target copy number, then screens genome-wide damaging mutations and copy-number features.
-4. Fits an ordinary least-squares linear regression containing lineage, target expression, target copy number and a small nonredundant biomarker set.
-5. Keeps those fitted coefficients and predictions unchanged, but uses HC3-adjusted standard errors for confidence intervals and P values (and therefore FDR). Fixed-feature 10-fold cross-validation estimates held-out performance.
-6. Generates a self-contained HTML report.
+##### What is the purpose of this YAML file?
 
-### Analysis rules
+To have a highlighted section when some biological priors are known, and quickly follow up on their results.
 
-- Eligible biomarkers supplied in the optional YAML file are considered before automatic discoveries.
-- A mutation association is tested only when at least 10 models carry a damaging mutation in that candidate gene and at least 10 have no damaging-mutation call for it.
-- Copy-number features require at least 80% coverage among copy-number-assayed models and nonzero variance.
-- Automatic features require a BH FDR below 0.05 within their mutation or copy-number screen.
-- At most two automatic features per genomic modality enter the model.
-- If an automatic candidate has absolute correlation of at least 0.8 with a retained predictor, it stays in the univariate tables but is excluded from the multivariable linear regression to avoid unstable coefficients.
-- Numeric predictors are standardised so their model coefficients are easier to compare.
-- The ordinary linear-regression coefficients are reported with HC3-adjusted uncertainty.
-- Fixed-feature 10-fold cross-validation reports held-out prediction error (RMSE) and explained variation (R²).
+The target's eligible expression, damaging mutation and copy number follow the same modelling rule. They are reported as target characterisation instead of pre-specified hypotheses. Only cancer lineage indicators are unpenalized in the integrated model.
 
-#### Why use HC3-adjusted uncertainty?
+After the pan-cancer results, eligible target/pre-specified-hypothesis associations are estimated separately within each lineage containing at least 20 complete models. Mutation associations additionally require 10 altered and 10 wild type models in that lineage. FDR is corrected jointly across all estimable feature by lineage tests in this family.
 
-Ordinary linear-regression confidence intervals are most reliable when prediction errors have similar variability across cell lines. That assumption may not be realistic in DepMap because:
+### SOX10 worked example
 
-- Some cancer lineages are more variable than others.
-- Mutation groups can be small and unequal.
-- Some cell lines have unusual combinations of expression, copy number and mutations.
-- The regression may predict some groups more accurately than others.
+The retained worked example assesses SOX10, a lineage dependency in melanoma. Its pre-specified expression hypotheses represent the melanocytic SOX10/MITF transcriptional state (MITF, PAX3 and TFAP2A), an upstream SOX10 regulator (TYRO3), and receptor tyrosine kinase features associated with SOX10/MITF state or adaptation (ERBB3 and AXL). NF1, CDKN2A and PTEN damaging mutations represent loss of function melanoma contexts. MITF and EP300 copy number test reported genomic relationships with the SOX10 programme.
 
-HC3 does not refit the regression or change its coefficients and predictions. It recalculates the standard errors, confidence intervals and P values so that uncertainty is more cautious when unusual cell lines or uneven prediction errors are present. Model FDR values are calculated from these HC3-adjusted P values.
+These hypotheses are motivated by experimental studies showing that SOX10 depletion restricts melanoma cell proliferation and alters MITF and cell-cycle regulation, that PAX3/SOX10/MITF cooperate in melanoma transcriptional control, and that SOX10/MITF state is linked to receptor tyrosine kinase programmes. YAML designation makes these explicit hypotheses but does not guarantee eligibility, association or selection.
 
-> **In plain language:** HC3 asks the model to be more cautious when a small number of unusual cell lines could be driving an apparently precise result.
+## Integrated exploratory model
 
-Chronos scores become more negative as knockout has a stronger effect on cell fitness. See Dempster *et al.*, [Chronos: a cell population dynamics model of CRISPR experiments](https://doi.org/10.1186/s13059-021-02540-7).
+Every eligible expression, damaging mutation and copy number feature enters one integrated molecular search with penalty factor 1. Target characterisation, pre-specified hypothesis and genome wide candidate are biological source labels only, they do not affect model treatment. Cancer lineage indicators enter with penalty factor 0 to adjust for histological context. This means that lineage will always be present in the model, whilst other features may receive penalisation factors to drive their coefficients to zero. A feature with little individual association can become informative after lineage and other molecular data are considered jointly. Elastic net handles correlated predictors during that joint fitting.
+
+The model uses `glmnet` with:
+
+- Gaussian family because Chronos dependency is continuous.
+- `alpha = 0.5`, combining lasso sparsity with ridge-like handling of correlated biological signals.
+- The one-standard-error lambda, favouring the most regularized compact model whose inner-CV error remains within one standard error of the minimum.
+
+Preprocessing is learned inside each training fold. Continuous values use training fold median imputation and standardization. Mutation values use training fold modal imputation, binary encoding, and then centering and scaling from the training fold mutation prevalence and SD. This gives all molecular predictors a comparable one-SD scale. Training derived transformations are applied unchanged to held-out models.
+
+The pipeline runs 3 repeats of lineage stratified 5-fold outer CV, with lineage-stratified 5-fold inner CV for lambda selection. A molecular predictor is stable only if it:
+
+- Is selected in at least 60% of the 15 outer models.
+- Has the same coefficient direction in at least 80% of models in which it is selected.
+- Is nonzero in the full data elastic net fit.
+
+Zero stable molecular predictors is a valid result. In that case the pipeline reports up to ten highest frequency nonzero genome wide near misses as explicitly unstable exploratory candidates.
+
+## Result terminology
+
+- **Univariate association:** descriptive one feature at a time pan-cancer result.
+- **Lineage specific association:** eligible target/pre-specified-hypothesis association estimated within one lineage.
+- **Target characterisation:** an eligible target expression, damaging mutation or copy number feature.
+- **Pre-specified hypothesis:** an eligible YAML-listed molecular feature nominated before modelling.
+- **Genome wide candidate:** any other eligible molecular feature.
+- **Lineage adjustment:** the only predictor class included with zero penalty.
+- **Stable exploratory molecular predictor:** any molecular predictor meeting all frequency, direction and full fit criteria.
+- **Near miss:** nonzero in at least one outer model but failing the stability criteria; it is not retained.
+- **Predictive performance:** nested-CV held-out Pearson r, R² and root mean squared error (RMSE) for the whole procedure, an observed-versus-predicted diagnostic for each repeat, and mean absolute error (MAE), RMSE and within lineage R² for lineages with at least 20 models. Pearson r measures whether predictions and observations move together. Prediction error R² compares squared errors with assigning every model the observed mean, RMSE reports error size in Chronos units.
+
+## Workflow – What is happening?
+
+1. Validate model identifiers, feature availability, coverage, variance and mutation group sizes.
+2. Run descriptive pan-cancer expression, damaging mutation and copy number screens.
+3. Report target self-associations and YAML hypotheses, then follow eligible ones within lineages.
+4. Build one predictor matrix containing all eligible molecular features plus lineage adjustment.
+5. Run repeated nested CV with fold specific preprocessing and elastic net selection.
+6. Report designation, compact coefficients, stability, held out performance, figures and the HTML assessment.
+
+## Outputs
+
+Each run writes a target-specific result tree and a self-contained report. The principal integrated-model interfaces are:
+
+```text
+results/<TARGET>/tables/12_feature_designation.csv
+results/<TARGET>/tables/13_integrated_model_coefficients.csv
+results/<TARGET>/tables/14_selection_stability.csv
+results/<TARGET>/tables/15_nested_cv_performance.csv
+results/<TARGET>/tables/16_nested_cv_predictions.csv  # generated locally, excluded from Git
+results/<TARGET>/tables/17_lineage_cv_performance.csv
+results/<TARGET>/intermediate/integrated_model.rds
+reports/<TARGET>_target_assessment.html
+```
 
 ## Repository structure
 
 ```text
 .
 ├── R/util.R
-├── config/MDM2_biomarkers.yml
-├── data/README.md
-├── reports/
-│   ├── target_assessment.Rmd
-│   └── MDM2_target_assessment.html
+├── config/<TARGET>_biomarkers.yml
+├── data/README.md  # data dictionary to work with
+├── reports/target_assessment.Rmd  # report script
 ├── results/<TARGET>/
-│   ├── figures/
-│   └── tables/
 ├── scripts/
-│   ├── 01.prepare.depmap.data.R
-│   ├── 02.dependency.landscape.R
-│   ├── 03.molecular.associations.R
-│   ├── 04.multivariable.model.R
-│   └── 05.generate.figures.R
-├── tests/run_tests.R
+|    ├── 01.prepare.depmap.data.R
+|    ├── 02.dependency.landscape.R
+|    ├── 03.molecular.associations.R
+|    ├── 04.multivariable.model.R
+|    └── 05.generate.figures.R
 ├── environment.yml
 └── run_analysis.R
 ```
 
-Each target creates its own output files, repeated runs don't overwrite analyses of other genes. Full association objects and model-level data are reproducible intermediates and remain Git-ignored; only compact top-ranked tables, figures and reports are intended for version control.
+## Limitations
 
-## Worked example and interpretation
+- DepMap associations can reflect lineage composition or unmeasured confounding.
+- Nested CV reduces selection/evaluation leakage but is not an independent external validation.
+- Correlated features may share signal, so selection frequencies can be distributed across substitutes.
+- Cell line knockout phenotypes may not reproduce in tumours, normal tissues or other experiments.
 
-The checked-in MDM2 report is generated from **DepMap Public 26Q1** using the optional TP53 biomarker configuration. Target labels, columns, paths, feature screens and reporting statements are generated automatically at runtime.
+Chronos scores become more negative as knockout has a stronger effect on cell fitness. See Dempster *et al.*, [Chronos: a cell population dynamics model of CRISPR experiments](https://doi.org/10.1186/s13059-021-02540-7).
 
-Please note: Associations should be treated as hypothesis-generating. A feature can remain associated after adjustment without being causal, and a genetic dependency is not equivalent to a druggable or safe therapeutic target.
+The SOX10 hypothesis rationale draws on experimental work on [SOX10 loss and melanoma proliferation](https://pmc.ncbi.nlm.nih.gov/articles/PMC3803156/), [PAX3/SOX10/MITF regulation in melanoma](https://pmc.ncbi.nlm.nih.gov/articles/PMC2979310/), [SOX10 addiction and copy-number gain](https://pmc.ncbi.nlm.nih.gov/articles/PMC5540806/), and the [MITF-low/AXL-high adaptive state](https://pmc.ncbi.nlm.nih.gov/articles/PMC4428333/).
 
-## Important limitations
-
-- DepMap associations are observational and can reflect lineage composition or unmeasured confounding.
-- Copy-number features from the same chromosomal event can be highly correlated; one representative may be selected for modelling.
-- Discovery and model evaluation use the same DepMap release. HC3-adjusted intervals and fixed-feature cross-validation do not provide independent validation.
-- The multivariable linear regression uses complete cases, which may change cohort composition.
-- Cell-line knockout phenotypes may not reproduce in tumours, normal tissues or pharmacological experiments.
-- Damaging-mutation calls use the supplied binary/ordinal DepMap matrix and do not model allele-specific function.
-
-## Data source
-
-The example uses [DepMap Public 26Q1](https://depmap.org/portal/data_page/?tab=currentRelease). Downloaded datasets retain their own data-use terms and requested citations. Raw and model-level data are intentionally excluded from this MIT-licensed software repository.
+The example data use [DepMap Public 26Q1](https://depmap.org/portal/data_page/?tab=currentRelease). Raw matrices, model-level intermediates and cell-line-level prediction tables remain excluded from version control.

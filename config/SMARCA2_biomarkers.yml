@@ -1,0 +1,12 @@
+target: SMARCA2
+expression:
+  - SMARCA4
+  - ARID1A
+  - SMARCB1
+mutation:
+  - SMARCA4
+  - ARID1A
+  - SMARCB1
+copy_number:
+  - SMARCA4
+  - SMARCB1

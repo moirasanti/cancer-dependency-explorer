@@ -1,0 +1,19 @@
+target: TP53
+expression:
+  - PTEN
+  - MDM2
+  - MDM4
+  - PPM1D
+  - CDKN1A
+mutation:
+  - PTEN
+  - ATM
+  - CHEK2
+  - CDKN2A
+  - RB1
+copy_number:
+  - PTEN
+  - MDM2
+  - MDM4
+  - PPM1D
+  - CDKN2A

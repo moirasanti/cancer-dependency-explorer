@@ -29,3 +29,50 @@ blockquote {
   color: #4b5d5e;
   border-left-color: #28666e;
 }
+
+.model-construction-details {
+  margin: 1rem 0 1.5rem;
+}
+
+.model-construction-details > summary {
+  cursor: pointer;
+  color: #28666e;
+  padding: 0.35rem 0;
+}
+
+.model-details-box {
+  margin-top: 0.75rem;
+  padding: 1rem 1.25rem 0.25rem;
+  background: #f2f7f7;
+  border: 1px solid #c9dddd;
+  border-left: 4px solid #28666e;
+  border-radius: 4px;
+}
+
+.stability-callout {
+  position: relative;
+  margin: 1.25rem 0 1.75rem;
+  padding: 1rem 1.25rem 1rem 3.75rem;
+  color: #4c4632;
+  background: #fffbea;
+  border: 1px solid #eadb9b;
+  border-left: 4px solid #d5a928;
+  border-radius: 5px;
+}
+
+.stability-callout::before {
+  content: "\1F4A1";
+  position: absolute;
+  top: 0.85rem;
+  left: 1rem;
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.stability-callout p {
+  margin: 0 0 0.6rem;
+}
+
+.stability-callout p:last-child {
+  margin-bottom: 0;
+}

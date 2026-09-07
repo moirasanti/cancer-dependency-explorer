@@ -1,7 +1,0 @@
-check,passed,detail
-Target in CRISPR matrix,TRUE,EGFR
-Unique ModelID after multiomic joins,TRUE,1208
-At least 50 dependency observations,TRUE,1208
-At least 50 models with lineage annotation,TRUE,1208
-Expression has nonzero variance,TRUE,SD 2.345
-Copy number has nonzero variance,TRUE,SD 2.451

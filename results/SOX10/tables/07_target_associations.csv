@@ -1,0 +1,4 @@
+feature,modality,test,n,estimate,estimate_type,p_value,fdr,eligible
+SOX10 expression,expression,Spearman correlation,1140,-0.149081591293712,Spearman rho,4.27395130527095e-07,9.15254521994979e-06,TRUE
+SOX10 damaging mutation,mutation,Welch mean comparison,3 altered / 1205 reference,0.111030772101497,Altered minus reference,,,FALSE
+SOX10 copy number,copy_number,Pearson correlation,858,-0.31572953194997,Pearson r,2.58592198580442e-21,3.09405565601498e-18,TRUE

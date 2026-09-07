@@ -68,8 +68,8 @@ if (sum(!is.na(analysis.data$lineage)) < 50L) {
 }
 
 ## MAIN ANALYSIS ###############################################################
-## Summarise continuous associations between target dependency and its own expression or copy number.
-message("Screening continuous associations...")
+## Summarise coverage of the prepared target-level modalities.
+message("Checking target-modality coverage...")
 coverage.summary <- data.frame(
   modality = c("dependency", "lineage", "expression", "copy_number"),
   observed = c(
@@ -111,8 +111,5 @@ quality.checks <- data.frame(
 fwrite(coverage.summary, file.path(table.dir, "01_modality_coverage.csv"))
 fwrite(quality.checks, file.path(table.dir, "02_data_quality_checks.csv"))
 saveRDS(analysis.data, file.path(intermediate.dir, "analysis_data.rds"))
-
-session.information <- sub("[[:space:]]+$", "", capture.output(sessionInfo()))
-writeLines(session.information, file.path(table.dir, "03_session_info.txt"))
 
 message("Prepared ", nrow(analysis.data), " dependency models.")

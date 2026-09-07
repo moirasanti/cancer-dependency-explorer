@@ -1,0 +1,15 @@
+target: SOX10
+expression:
+  - MITF
+  - PAX3
+  - TFAP2A
+  - TYRO3
+  - ERBB3
+  - AXL
+mutation:
+  - NF1
+  - CDKN2A
+  - PTEN
+copy_number:
+  - MITF
+  - EP300

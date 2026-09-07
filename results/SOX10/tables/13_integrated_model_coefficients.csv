@@ -1,0 +1,11 @@
+term,modality,gene,role,label,coefficient,selection_frequency,direction_concordance,stable
+expression__SOX10,expression,SOX10,target_characterization,SOX10 expression,-0.11136754864815,1,1,TRUE
+expression__CDH19,expression,CDH19,genome_wide_candidate,CDH19 expression,-0.0261896379406979,1,1,TRUE
+expression__ABCB5,expression,ABCB5,genome_wide_candidate,ABCB5 expression,-0.0181066501656242,1,1,TRUE
+expression__MLANA,expression,MLANA,genome_wide_candidate,MLANA expression,-0.0130726130762722,0.933333333333333,1,TRUE
+expression__MIA,expression,MIA,genome_wide_candidate,MIA expression,-0.00979371782170863,0.933333333333333,1,TRUE
+expression__ROPN1,expression,ROPN1,genome_wide_candidate,ROPN1 expression,-0.0167116229875014,0.866666666666667,1,TRUE
+expression__TRIM51,expression,TRIM51,genome_wide_candidate,TRIM51 expression,-0.0172556489955186,0.8,1,TRUE
+expression__FOXL3,expression,FOXL3,genome_wide_candidate,FOXL3 expression,-0.0157736368984071,0.8,1,TRUE
+expression__TRIM63,expression,TRIM63,genome_wide_candidate,TRIM63 expression,-0.0110017938847688,0.8,1,TRUE
+expression__ROPN1B,expression,ROPN1B,genome_wide_candidate,ROPN1B expression,-0.00951905695597548,0.733333333333333,1,TRUE

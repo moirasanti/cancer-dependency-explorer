@@ -16,7 +16,10 @@ Point the workflow to the download directory without copying the matrices into t
 
 ```bash
 DEPMAP_RAW_DIR=/path/to/depmap/26Q1 \
-  Rscript run_analysis.R --target MDM2
+  Rscript run_analysis.R \
+    --target SOX10 \
+    --release "DepMap Public 26Q1" \
+    --biomarkers config/SOX10_biomarkers.yml
 ```
 
 Raw matrices and model-level intermediates are excluded from Git because they are large and retain the terms attached to their DepMap downloads. Before redistributing any data-derived artifact, review the licence and requested citation displayed for every contributing file.
