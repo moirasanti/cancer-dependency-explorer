@@ -1,5 +1,12 @@
 #!/usr/bin/env Rscript
 
+conda.prefix <- Sys.getenv("CONDA_PREFIX", unset = "")
+conda.library <- file.path(conda.prefix, "lib", "R", "library")
+
+if (nzchar(conda.prefix) && dir.exists(conda.library)) {
+  .libPaths(conda.library)
+}
+
 source("R/util.R")
 
 # Read the supported command-line arguments without adding a CLI dependency.
