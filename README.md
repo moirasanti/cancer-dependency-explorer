@@ -15,7 +15,7 @@ conda env create -f environment.yml
 conda activate cancer-dependency-explorer
 ```
 
-Download the files listed in [data/README.md](data/README.md) and place them in `data/raw/`, then run:
+Clone the repository in your local (see structure in **Repository structure**), download the files listed in [data/README.md](data/README.md) and place them in `data/raw/`, then run:
 
 ```bash
 Rscript run_analysis.R \
