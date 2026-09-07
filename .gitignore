@@ -11,6 +11,9 @@ results/*/intermediate/
 results/*/tables/16_nested_cv_predictions.csv
 tests/
 
+# Pre-defined hypotheses for new tests
+config/*_biomarkers.yml
+
 *.csv.gz
 *.tsv.gz
 tmp/
