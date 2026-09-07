@@ -4,7 +4,7 @@
 
 Cancer Dependency Explorer is a reproducible R workflow that integrates DepMap CRISPR dependency with cancer lineage, expression, damaging mutations and copy number. The integrated modelling uses elastic net so conditional or suppressor relationships can emerge without needing to pass a marginal association threshold first.
 
-The workflow produces data quality summaries, target self-associations, analyses on pre-specified hypothesis, lineage adjusted tests, whole genome analysese, results on an integrated model with performance evaluated with cross validation, and a self-contained HTML report.
+The workflow produces data quality summaries, target self-associations, analyses on pre-specified hypotheses, within-lineage follow-up, whole-genome analyses, results on an integrated model with performance evaluated with cross-validation, and a self-contained HTML report.
 
 ## Run a target assessment
 
@@ -52,7 +52,7 @@ Eligible damaging-mutation associations are tested with R's built-in unequal-var
 
 ##### What is the purpose of this YAML file?
 
-To have a highlighted section when some biological priors are known, and quickly follow up on their results.
+To have a highlighted section when some biological pre-specified hypotheses are known, and quickly follow up on their results.
 
 The target's eligible expression, damaging mutation and copy number follow the same modelling rule. They are reported as target characterisation instead of pre-specified hypotheses. Only cancer lineage indicators are unpenalized in the integrated model.
 
@@ -87,11 +87,11 @@ Zero stable molecular predictors is a valid result. In that case the pipeline re
 ## Result terminology
 
 - **Univariate association:** descriptive one feature at a time pan-cancer result.
-- **Lineage specific association:** eligible target/pre-specified-hypothesis association estimated within one lineage.
+- **Within-lineage association:** eligible target/pre-specified-hypothesis association estimated separately within one lineage; this is descriptive and is not a formal test that effects differ between lineages.
 - **Target characterisation:** an eligible target expression, damaging mutation or copy number feature.
 - **Pre-specified hypothesis:** an eligible YAML-listed molecular feature nominated before modelling.
 - **Genome wide candidate:** any other eligible molecular feature.
-- **Lineage adjustment:** the only predictor class included with zero penalty.
+- **Lineage adjustment:** the only predictor class included with zero penalty; it allows different lineage baselines but does not include feature-by-lineage interactions.
 - **Stable exploratory molecular predictor:** any molecular predictor meeting all frequency, direction and full fit criteria.
 - **Near miss:** nonzero in at least one outer model but failing the stability criteria; it is not retained.
 - **Predictive performance:** nested-CV held-out Pearson r, R² and root mean squared error (RMSE) for the whole procedure, an observed-versus-predicted diagnostic for each repeat, and mean absolute error (MAE), RMSE and within lineage R² for lineages with at least 20 models. Pearson r measures whether predictions and observations move together. Prediction error R² compares squared errors with assigning every model the observed mean, RMSE reports error size in Chronos units.
