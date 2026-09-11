@@ -224,7 +224,7 @@ calculate_safe_spearman <- function(x, y) {
 calculate_safe_welch <- function(
   altered_scores,
   wild_type_scores,
-  minimum_group_size = 10L
+  minimum_group_size = 3L
 ) {
   altered_scores <- altered_scores[is.finite(altered_scores)]
   wild_type_scores <- wild_type_scores[is.finite(wild_type_scores)]
@@ -465,8 +465,8 @@ fit_lineage_specific_associations <- function(
   feature,
   lineage,
   continuous = TRUE,
-  minimum.lineage.size = 20L,
-  minimum.mutation.group.size = 10L
+  minimum.lineage.size = 10L,
+  minimum.mutation.group.size = 3L
 ) {
   complete.rows <- complete.cases(outcome, feature, lineage)
   feature.values <- feature[complete.rows]
