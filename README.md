@@ -46,7 +46,7 @@ copy_number:
 Every YAML feature is first evaluated pan-cancer in the same modality wide univariate screen as every other gene. In the integrated model, an eligible YAML feature receives the same penalty and stability requirements as every other molecular feature. Eligibility still applies:
 
 - Expression and copy number require at least 80% coverage among models with any data from the corresponding assay, plus nonzero variance. Models without that assay are retained for integrated modelling and receive training fold median imputation; the report shows overall assay coverage separately.
-- Damaging mutations require at least 10 altered and 10 wild type models.
+- Damaging mutations require at least 3 altered and 3 wild type models.
 
 Eligible damaging-mutation associations are tested with R's built-in unequal-variance Welch t-test. The reported mean difference, 95% confidence interval and P value come from the same test, followed by modality-wide FDR correction.
 
@@ -56,7 +56,7 @@ To have a highlighted section when some biological pre-specified hypotheses are 
 
 The target's eligible expression, damaging mutation and copy number follow the same modelling rule. They are reported as target characterisation instead of pre-specified hypotheses. Only cancer lineage indicators are unpenalized in the integrated model.
 
-After the pan-cancer results, eligible target/pre-specified-hypothesis associations are estimated separately within each lineage containing at least 20 complete models. Mutation associations additionally require 10 altered and 10 wild type models in that lineage. FDR is corrected jointly across all estimable feature by lineage tests in this family.
+After the pan-cancer results, eligible target/pre-specified-hypothesis associations are estimated separately within each lineage containing at least 10 complete models. Mutation associations additionally require 3 altered and 3 wild type models in that lineage. FDR is corrected jointly across all estimable feature by lineage tests in this family.
 
 ### SOX10 worked example
 
@@ -94,7 +94,7 @@ Zero stable molecular predictors is a valid result. In that case the pipeline re
 - **Lineage adjustment:** the only predictor class included with zero penalty; it allows different lineage baselines but does not include feature-by-lineage interactions.
 - **Stable exploratory molecular predictor:** any molecular predictor meeting all frequency, direction and full fit criteria.
 - **Near miss:** nonzero in at least one outer model but failing the stability criteria; it is not retained.
-- **Predictive performance:** nested-CV held-out Pearson r, R² and root mean squared error (RMSE) for the whole procedure, an observed-versus-predicted diagnostic for each repeat, and mean absolute error (MAE), RMSE and within lineage R² for lineages with at least 20 models. Pearson r measures whether predictions and observations move together. Prediction error R² compares squared errors with assigning every model the observed mean, RMSE reports error size in Chronos units.
+- **Predictive performance:** nested-CV held-out Pearson r, R² and root mean squared error (RMSE) for the whole procedure, an observed-versus-predicted diagnostic for each repeat, and mean absolute error (MAE), RMSE and within lineage R² for lineages with at least 10 models. Pearson r measures whether predictions and observations move together. Prediction error R² compares squared errors with assigning every model the observed mean, RMSE reports error size in Chronos units.
 
 ## Workflow – What is happening?
 
