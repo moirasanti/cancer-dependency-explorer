@@ -76,14 +76,14 @@ This report addresses the following question:
 
 **Which molecular features are associated with dependency on `r target`, and which exploratory molecular predictors are reproducible in held-out cancer cell line models?**
 
-In other words, the report first describes individual associations and then asks which eligible molecular features remain useful when every modality is considered jointly after adjustment for cancer lineage.
+In other words, the report first describes individual associations and then asks which eligible molecular features remain useful when every modality is considered jointly while allowing lineage to have different baseline dependency levels. The integrated model estimates one common molecular effect; it does not test whether that effect changes between lineages.
 
 The overall report narrative is structured as follows:
 
 - Eligibility and data quality
 - Dependency distribution and cancer-lineage characterisation
 - Self-associations between the dependency of `r target` and its own expression, damaging mutation and copy number
-- Associations between the dependency of `r target` and pre-specified hypotheses, plus accountability for lineage-specific effects
+- Associations between the dependency of `r target` and pre-specified hypotheses, followed by within-lineage follow-up
 - Associations between the dependency of `r target` and genome-wide expression, damaging mutation and copy number
 - Integrated exploratory modelling
 - Nested cross-validation performance
@@ -91,7 +91,7 @@ The overall report narrative is structured as follows:
 # How to read this report
 
 The purpose of this report is to explain why cancer cell line models differ in their dependency on **`r target`**, going from simple descriptions to an integrated analysis.
-First, it asks whether each measurement is reliable enough to analyse. It then shows what each feature does by itself, before allowing every eligible molecular feature to compete under the same regularization after adjustment for cancer lineage.
+First, it asks whether each measurement is reliable enough to analyse. It then shows what each feature does by itself, before allowing every eligible molecular feature to compete under the same regularization while accounting for lineage-specific baseline dependency. This additive adjustment does not represent molecular effects that vary between lineages; those require a feature-by-lineage interaction analysis.
 The final results are a prioritisation of reproducible exploratory predictors.
 
 The analysis has four layers:
@@ -104,7 +104,7 @@ Eligibility is a data quality decision made before interpreting an association. 
 |---|---|---|
 | Expression | Observed in at least 80% of models with any expression-assay data and has nonzero variance | A feature needs sufficient coverage and variation within the assayed models to compare them meaningfully. |
 | Copy number | Observed in at least 80% of models with any copy-number-assay data and has nonzero variance | Sparse or constant measurements within the assayed models cannot support a reliable correlation. |
-| Damaging mutation | At least 10 altered and 10 wild type models | Both biological groups must be represented well enough for an altered-versus-wild type comparison. |
+| Damaging mutation | At least 3 altered and 3 wild type models | Both biological groups must be represented well enough for an altered-versus-wild type comparison. |
 
 As per the data, there are three types of features described below. These modality rules apply equally to all three roles:
 
@@ -129,13 +129,13 @@ After eligibility is established, the integrated model treats every eligible mol
 - **Target characterisation:** eligible `r target` expression, damaging mutation and copy number describe the molecular state of the target.
 - **Pre-specified hypothesis:** eligible YAML features represent hypotheses nominated before modelling from biological knowledge.
 - **Genome-wide candidate:** every other eligible expression, mutation and copy-number feature.
-- **Lineage adjustment:** cancer-lineage indicators account for broad histological differences that could otherwise make a molecular feature appear associated simply because it is enriched in a more- or less-dependent lineage.
+- **Lineage adjustment:** cancer-lineage indicators account for broad histological differences in baseline dependency. In the integrated model they prevent a molecular coefficient from being driven solely by different lineage composition, but they do not allow the molecular coefficient itself to vary by lineage.
 
 Every eligible molecular feature enters with penalty factor 1 and can be reduced to zero. Only lineage indicators receive penalty factor 0.
 
 ### 4. Integrated exploratory model: what remains useful when the data are considered together?
 
-The integrated model asks: **after adjusting for cancer lineage, which eligible molecular features contribute reproducibly to prediction of `r target` dependency when all molecular measurements compete under the same regularization?**
+The integrated model asks: **after accounting for different lineage baselines, which eligible molecular features contribute reproducibly to prediction of `r target` dependency when all molecular measurements compete under the same regularization?** It estimates a common molecular effect across lineages. It does not test whether a feature has a stronger, weaker or opposite effect in a particular lineage.
 
 The parameter choices are:
 
@@ -482,7 +482,7 @@ if (nrow(prespecified.associations)) {
 
 # Lineage-specific molecular associations
 
-An additional layer of the analysis computes associations between `r target` dependency and its target-characterisation features, and between `r target` dependency and the pre-specified hypotheses, but this time within each cancer lineage. This evaluates whether a pancancer association may be driven by lineage composition and identifies the lineages in which it is supported.
+An additional layer of the analysis computes associations between `r target` dependency and its target-characterisation features, and between `r target` dependency and the pre-specified hypotheses, separately within each cancer lineage. This shows whether an association is present within a lineage and whether a pancancer association may be explained by lineage composition. These separate estimates are descriptive: they do not formally test whether the feature effect differs between lineages. A formal comparison requires a feature-by-lineage interaction model.
 
 The combined table below retains both estimable and non-estimable target/pre-specified-hypothesis rows (sorted by FDR). When a lineage lacks enough models, variation or mutation group stratification, the *Reason* column explains why no estimate or FDR is available.
 
@@ -748,7 +748,7 @@ knitr::kable(head(copy.number, 10), digits = 3, caption = "Top copy number assoc
 
 # Feature designation for integrated exploratory multiomic modelling
 
-The table below audits the predictors given to the model. Every feature passing the eligibility checks enters the integrated model. Lineage indicators are adjustment covariates and remain in the model always.
+The table below audits the predictors given to the model. Every feature passing the eligibility checks enters the integrated model. Lineage indicators remain in the model as unpenalized adjustment covariates, allowing different baseline dependency levels but not lineage-specific molecular effects.
 
 ```{r feature-designation-table}
 feature.designation.display <- feature.designation
@@ -776,7 +776,7 @@ knitr::kable(
 
 # Integrated exploratory model
 
-This model asks which molecular features help predict `r target` dependency when the data are considered together. All eligible expression, mutation and copy number features compete under the same penalty, including the target's own features and the pre-specified hypotheses. Cancer lineage is included without a penalty to adjust for broad differences between cancer types.
+This model asks which molecular features help predict `r target` dependency when the data are considered together. All eligible expression, mutation and copy number features compete under the same penalty, including the target's own features and the pre-specified hypotheses. Cancer lineage is included without a penalty to adjust for broad differences between cancer types. The molecular coefficients are common-effect estimates; lineage-specific molecular effects are not tested by this model.
 
 The model uses Gaussian elastic net (`alpha = 0.5`) and the more conservative one-standard-error lambda. Data preparation and feature selection are repeated within the training folds so held-out models do not influence the result. A feature is called *stable* when it is selected repeatedly, keeps the same direction, and is also nonzero in the full-data fit. More construction detail and the exact thresholds are provided in the workflow explanation above (see [4. Integrated exploratory model: what remains useful when the data are considered together?](#integrated-exploratory-model-what-remains-useful-when-the-data-are-considered-together)).
 
@@ -1119,7 +1119,7 @@ knitr::include_graphics(file.path(figure.dir, "08_observed_vs_predicted.png"))
 
 ## Performance by lineage
 
-This comparison asks whether the model predicts differences among cell lines *within* each cancer lineage. A lineage R-squared above zero means the model improves on assigning every cell line that lineage's average dependency score; a negative value means it performs worse than that simple reference. Only lineages with at least 20 models are shown. Lineage estimates are less precise than the pan-cancer result and should be treated as diagnostic rather than as separate validated models.
+This comparison asks whether the model predicts differences among cell lines *within* each cancer lineage. A lineage R-squared above zero means the model improves on assigning every cell line that lineage's average dependency score; a negative value means it performs worse than that simple reference. Only lineages with at least 10 models are shown. Lineage estimates are less precise than the pan-cancer result and should be treated as diagnostic rather than as separate validated models.
 
 ```{r lineage-performance-text, results='asis'}
 positive.lineage.count <- sum(lineage.performance$r_squared_mean > 0)
@@ -1210,7 +1210,7 @@ knitr::kable(
 
 # Conclusion, interpretation and limitations
 
-This report asked which molecular features are associated with dependency on **`r target`** and whether exploratory molecular predictors recur when all eligible modalities are considered jointly. It first described dependency and lineage patterns, retained the pan-cancer univariate screens as descriptive analyses, and followed eligible target/pre-specified-hypothesis associations within individual lineages. The integrated model then allowed every eligible molecular feature to compete under the same elastic-net penalty while keeping lineage as an unpenalized adjustment.
+This report asked which molecular features are associated with dependency on **`r target`** and whether exploratory molecular predictors recur when all eligible modalities are considered jointly. It first described dependency and lineage patterns, retained the pan-cancer univariate screens as descriptive analyses, and followed eligible target/pre-specified-hypothesis associations within individual lineages. The integrated model then allowed every eligible molecular feature to compete under the same elastic-net penalty while accounting for different lineage baselines. It estimates common molecular effects; formal lineage-dependent molecular effects would require a separate feature-by-lineage interaction analysis.
 
 The resulting stable genes, when present, are exploratory molecular predictors rather than causal genes or independently significant effects. Their evidence is summarized by repeated outer-fold selection frequency, coefficient-direction concordance, persistence in the full-data fit and nested-CV performance.
 
